@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchAllGuildfordVenues } from '@/lib/places';
-import { mockScoreFromReviews } from '@/lib/mockScoring';
 import { getSupabaseClient } from '@/lib/supabase';
 
 const PEXELS_FALLBACK_IMAGES = [
@@ -55,27 +54,7 @@ function slugify(name: string): string {
     .slice(0, 80);
 }
 
-const PLACES_API_BASE = 'https://maps.googleapis.com/maps/api/place';
 const DETAILS_CONCURRENCY = 5;
-
-async function getPlaceDetails(
-  placeId: string,
-  apiKey: string,
-): Promise<{ reviews: string[]; website: string | null }> {
-  const params = new URLSearchParams({
-    place_id: placeId,
-    fields: 'reviews,website',
-    key: apiKey,
-  });
-  const res = await fetch(`${PLACES_API_BASE}/details/json?${params}`);
-  const data = await res.json();
-  if (data.status !== 'OK') return { reviews: [], website: null };
-  const reviews: { text?: string }[] = data.result?.reviews ?? [];
-  return {
-    reviews: reviews.map((r) => r.text ?? '').filter(Boolean),
-    website: data.result?.website ?? null,
-  };
-}
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
@@ -127,6 +106,10 @@ export async function POST(req: NextRequest) {
   const skipped: string[] = [];
   const errors: { name: string; error: string }[] = [];
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const ingestUrl = `${supabaseUrl}/functions/v1/ingest-restaurant`;
+
   for (let i = 0; i < toProcess.length; i += DETAILS_CONCURRENCY) {
     const batch = toProcess.slice(i, i + DETAILS_CONCURRENCY);
 
@@ -134,15 +117,15 @@ export async function POST(req: NextRequest) {
       batch.map(async (place, batchIdx) => {
         const globalIdx = i + batchIdx;
         try {
-          const { reviews, website } = await getPlaceDetails(place.place_id, apiKey);
-
-          const scored = mockScoreFromReviews(reviews, place.venue_type, place.rating);
-          const id = slugify(place.name);
           const image_url = pickImage(place.venue_type, globalIdx);
 
-          const { error: upsertError } = await supabase.from('restaurants').upsert(
-            {
-              id,
+          const res = await fetch(ingestUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
               place_id: place.place_id,
               name: place.name,
               address: place.address,
@@ -150,27 +133,19 @@ export async function POST(req: NextRequest) {
               google_rating: place.rating,
               google_review_count: place.user_ratings_total,
               image_url,
-              website: website ?? null,
-              lat: place.lat,
-              lng: place.lng,
-              toddler_score: scored.toddler_score,
-              confidence: scored.confidence,
-              summary: scored.summary,
-              toddler_features: scored.toddler_features,
-              evidence_quotes: scored.evidence_quotes,
-              ai_negative_signals: scored.ai_negative_signals,
-              positive_signals: scored.positive_signals,
-              negative_signals: scored.negative_signals,
-              cached_reviews: reviews,
-              last_review_fetch: new Date().toISOString(),
-              last_analysed_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' },
-          );
+              force_refresh: true,
+            }),
+          });
 
-          if (upsertError) {
-            errors.push({ name: place.name, error: upsertError.message });
+          if (!res.ok) {
+            const errText = await res.text();
+            errors.push({ name: place.name, error: `Ingest function error ${res.status}: ${errText}` });
+            return;
+          }
+
+          const result = await res.json();
+          if (result.error) {
+            errors.push({ name: place.name, error: result.error });
           } else {
             inserted.push(place.name);
           }

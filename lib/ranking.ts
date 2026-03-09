@@ -1,7 +1,16 @@
-import { Restaurant, DetailedAggregation, ConfirmationFeature, DetailedFacility, DetailedExperienceTag } from './types';
+import { Restaurant, DetailedAggregation, ConfirmationFeature, DetailedFacility, DetailedExperienceTag, VenueType } from './types';
 import { aggregateConfirmations } from './confirmations';
 import { aggregateDetailedSubmissions } from './detailedSubmissions';
 import { getSupabaseClient } from './supabase';
+
+export type { VenueType };
+
+export const VENUE_TYPE_OPTIONS: { key: VenueType; label: string }[] = [
+  { key: 'restaurant', label: 'Restaurant' },
+  { key: 'cafe', label: 'Cafe' },
+  { key: 'pub', label: 'Pub' },
+  { key: 'bakery', label: 'Bakery' },
+];
 
 export type ActiveFilter =
   | 'high_chairs'
@@ -45,6 +54,14 @@ export interface RankedRestaurant {
   detailedAggregation: DetailedAggregation;
   confirmedFacilities: DetailedFacility[];
   confirmedExperienceTags: DetailedExperienceTag[];
+}
+
+export function filterByVenueTypes(
+  ranked: RankedRestaurant[],
+  types: VenueType[],
+): RankedRestaurant[] {
+  if (types.length === 0) return ranked;
+  return ranked.filter(({ restaurant }) => types.includes(restaurant.type));
 }
 
 function computeFinalScore(

@@ -1,10 +1,11 @@
 'use client';
 
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { ActiveFilter, FILTER_OPTIONS_BY_GROUP } from '@/lib/ranking';
+import { ActiveFilter, FILTER_OPTIONS_BY_GROUP, VENUE_TYPE_OPTIONS, VenueType } from '@/lib/ranking';
 
 interface Props {
   activeFilters: ActiveFilter[];
+  activeVenueTypes: VenueType[];
 }
 
 function FilterChip({
@@ -41,7 +42,7 @@ function FilterChip({
   );
 }
 
-export default function BestPageFilters({ activeFilters }: Props) {
+export default function BestPageFilters({ activeFilters, activeVenueTypes }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -62,6 +63,22 @@ export default function BestPageFilters({ activeFilters }: Props) {
     router.replace(`${pathname}?${params.toString()}`);
   }
 
+  function toggleVenueType(key: VenueType) {
+    const current = new Set(activeVenueTypes);
+    if (current.has(key)) {
+      current.delete(key);
+    } else {
+      current.add(key);
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    if (current.size > 0) {
+      params.set('type', Array.from(current).join(','));
+    } else {
+      params.delete('type');
+    }
+    router.replace(`${pathname}?${params.toString()}`);
+  }
+
   function removeFilter(key: ActiveFilter) {
     const current = new Set(activeFilters);
     current.delete(key);
@@ -77,6 +94,7 @@ export default function BestPageFilters({ activeFilters }: Props) {
   function clearAll() {
     const params = new URLSearchParams(searchParams.toString());
     params.delete('filter');
+    params.delete('type');
     router.replace(`${pathname}?${params.toString()}`);
   }
 
@@ -85,8 +103,30 @@ export default function BestPageFilters({ activeFilters }: Props) {
     .filter((o) => activeFilters.includes(o.key))
     .map((o) => ({ key: o.key, label: o.label }));
 
+  const activeVenueTypeLabels = VENUE_TYPE_OPTIONS
+    .filter((o) => activeVenueTypes.includes(o.key))
+    .map((o) => ({ key: o.key, label: o.label }));
+
+  const hasActiveFilters = activeFilterLabels.length > 0 || activeVenueTypeLabels.length > 0;
+
   return (
     <div className="space-y-5">
+      <div>
+        <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-2.5">
+          Venue type
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {VENUE_TYPE_OPTIONS.map(({ key, label }) => (
+            <FilterChip
+              key={key}
+              label={label}
+              active={activeVenueTypes.includes(key)}
+              onClick={() => toggleVenueType(key)}
+            />
+          ))}
+        </div>
+      </div>
+
       <div>
         <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-2.5">
           Facilities
@@ -119,13 +159,35 @@ export default function BestPageFilters({ activeFilters }: Props) {
         </div>
       </div>
 
-      {activeFilterLabels.length > 0 && (
+      {hasActiveFilters && (
         <div className="pt-3 border-t border-stone-100">
           <div className="flex items-start gap-2 flex-wrap">
             <span className="text-xs font-medium text-stone-500 mt-1.5 flex-shrink-0">
               Active filters:
             </span>
             <div className="flex flex-wrap gap-1.5">
+              {activeVenueTypeLabels.map(({ key, label }) => (
+                <span
+                  key={key}
+                  className="inline-flex items-center gap-1 text-xs bg-sky-50 text-sky-700 border border-sky-200 pl-2.5 pr-1.5 py-1 rounded-full font-medium"
+                >
+                  {label}
+                  <button
+                    onClick={() => toggleVenueType(key)}
+                    className="w-4 h-4 rounded-full bg-sky-100 hover:bg-sky-200 flex items-center justify-center transition-colors flex-shrink-0"
+                    aria-label={`Remove ${label} filter`}
+                  >
+                    <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="none">
+                      <path
+                        d="M2.5 2.5l5 5M7.5 2.5l-5 5"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </span>
+              ))}
               {activeFilterLabels.map(({ key, label }) => (
                 <span
                   key={key}

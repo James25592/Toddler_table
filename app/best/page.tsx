@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { getAllRestaurants } from '@/lib/restaurants';
-import { buildRankedRestaurants, filterRanked, ActiveFilter, FILTER_OPTIONS } from '@/lib/ranking';
+import { buildRankedRestaurants, filterRanked, filterByVenueTypes, ActiveFilter, FILTER_OPTIONS, VENUE_TYPE_OPTIONS, VenueType } from '@/lib/ranking';
 import Header from '@/components/Header';
 import BestPageFilters from '@/components/BestPageFilters';
 import RestaurantListClient from '@/components/RestaurantListClient';
@@ -9,7 +9,7 @@ import RestaurantListClient from '@/components/RestaurantListClient';
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
-  searchParams: { filter?: string };
+  searchParams: { filter?: string; type?: string };
 }
 
 function parseFilters(raw: string | undefined): ActiveFilter[] {
@@ -20,11 +20,21 @@ function parseFilters(raw: string | undefined): ActiveFilter[] {
     .filter((f): f is ActiveFilter => valid.has(f as ActiveFilter));
 }
 
+function parseVenueTypes(raw: string | undefined): VenueType[] {
+  if (!raw) return [];
+  const valid = new Set(VENUE_TYPE_OPTIONS.map((o) => o.key));
+  return raw
+    .split(',')
+    .filter((t): t is VenueType => valid.has(t as VenueType));
+}
+
 export default async function BestRestaurantsPage({ searchParams }: PageProps) {
   const activeFilters = parseFilters(searchParams.filter);
+  const activeVenueTypes = parseVenueTypes(searchParams.type);
   const allRestaurants = await getAllRestaurants();
   const ranked = await buildRankedRestaurants(allRestaurants);
-  const displayed = filterRanked(ranked, activeFilters);
+  const byType = filterByVenueTypes(ranked, activeVenueTypes);
+  const displayed = filterRanked(byType, activeFilters);
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -63,14 +73,14 @@ export default async function BestRestaurantsPage({ searchParams }: PageProps) {
               </svg>
               <span className="text-sm font-semibold text-stone-700">Filter by need</span>
             </div>
-            {activeFilters.length > 0 && (
+            {(activeFilters.length + activeVenueTypes.length) > 0 && (
               <span className="text-xs font-medium text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
-                {activeFilters.length} active
+                {activeFilters.length + activeVenueTypes.length} active
               </span>
             )}
           </div>
           <Suspense fallback={null}>
-            <BestPageFilters activeFilters={activeFilters} />
+            <BestPageFilters activeFilters={activeFilters} activeVenueTypes={activeVenueTypes} />
           </Suspense>
         </div>
 

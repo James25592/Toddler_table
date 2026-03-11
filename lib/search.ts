@@ -1,4 +1,6 @@
 const CUSTOM_SEARCH_API_BASE = 'https://www.googleapis.com/customsearch/v1';
+const RESULTS_PER_QUERY = 3;
+const MIN_SNIPPET_LENGTH = 20;
 
 export interface SearchSnippet {
   title: string;
@@ -60,16 +62,17 @@ export async function fetchExternalRestaurantMentions(
   }
 
   const queries = [
-    `"${restaurantName}" Guildford toddler`,
-    `"${restaurantName}" Guildford high chair`,
+    `"${restaurantName}" high chair`,
+    `"${restaurantName}" kids menu`,
+    `"${restaurantName}" family friendly`,
+    `"${restaurantName}" child friendly`,
+    `"${restaurantName}" pram stroller`,
   ];
-
-  const resultsPerQuery = 5;
 
   const queryResults = await Promise.all(
     queries.map(async (q) => {
       try {
-        return await runQuery(q, apiKey, cx, resultsPerQuery);
+        return await runQuery(q, apiKey, cx, RESULTS_PER_QUERY);
       } catch (err) {
         console.warn(`[search] Query failed for "${q}": ${err instanceof Error ? err.message : String(err)}`);
         return [] as SearchSnippet[];
@@ -78,15 +81,18 @@ export async function fetchExternalRestaurantMentions(
   );
 
   const combined = queryResults.flat();
-  const seen = new Set<string>();
+
+  const seenLinks = new Set<string>();
+  const seenSnippets = new Set<string>();
   const deduped: SearchSnippet[] = [];
 
   for (const item of combined) {
-    if (!seen.has(item.link)) {
-      seen.add(item.link);
-      deduped.push(item);
-    }
-    if (deduped.length >= 10) break;
+    const normalised = item.snippet.trim().toLowerCase();
+    if (normalised.length < MIN_SNIPPET_LENGTH) continue;
+    if (seenLinks.has(item.link) || seenSnippets.has(normalised)) continue;
+    seenLinks.add(item.link);
+    seenSnippets.add(normalised);
+    deduped.push(item);
   }
 
   return { snippets: deduped };

@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { z } from "npm:zod@3";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,6 +44,46 @@ interface DbRestaurant {
   last_review_fetch: string | null;
   last_analysed_at: string | null;
 }
+
+const FeaturePresenceSchema = z.union([z.boolean(), z.literal("unknown")]);
+
+const ExtractionResultSchema = z.object({
+  high_chairs: FeaturePresenceSchema,
+  pram_space: FeaturePresenceSchema,
+  changing_table: FeaturePresenceSchema,
+  kids_menu: FeaturePresenceSchema,
+  staff_child_friendly: FeaturePresenceSchema,
+  noise_tolerant: FeaturePresenceSchema,
+  negative_signals: z.array(z.string()),
+  evidence_quotes: z.array(z.string()),
+});
+
+type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
+
+const EXTRACTION_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    high_chairs: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    pram_space: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    changing_table: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    kids_menu: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    staff_child_friendly: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    noise_tolerant: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    negative_signals: { type: "array", items: { type: "string" } },
+    evidence_quotes: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "high_chairs",
+    "pram_space",
+    "changing_table",
+    "kids_menu",
+    "staff_child_friendly",
+    "noise_tolerant",
+    "negative_signals",
+    "evidence_quotes",
+  ],
+  additionalProperties: false,
+};
 
 function slugify(name: string): string {
   return name
@@ -121,13 +162,96 @@ async function callClaude(
   }
 }
 
-function parseJson<T>(raw: string): T | null {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) return null;
+async function callClaudeWithJsonSchema(
+  systemPrompt: string,
+  userMessage: string,
+  apiKey: string,
+  maxTokens = 1024,
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
   try {
-    return JSON.parse(match[0]) as T;
+    const res = await fetch(CLAUDE_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "json-output-1",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "extraction_result",
+            schema: EXTRACTION_JSON_SCHEMA,
+            strict: true,
+          },
+        },
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      if (res.status === 400 || res.status === 404) return "";
+      throw new Error(`Claude error: ${res.status} — ${body}`);
+    }
+    const data = await res.json();
+    return data.content?.[0]?.text ?? "";
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function parseAndValidateExtraction(raw: string, context: string): ExtractionResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
   } catch {
-    return null;
+    console.error(`[ingest] JSON parse failed (${context}):`, raw.slice(0, 500));
+    throw new Error(`Failed to parse JSON from Claude response (${context})`);
+  }
+
+  const result = ExtractionResultSchema.safeParse(parsed);
+  if (!result.success) {
+    console.error(`[ingest] Zod validation failed (${context}):`, result.error.format(), "raw:", raw.slice(0, 500));
+    throw new Error(`Invalid extraction schema from Claude (${context}): ${result.error.message}`);
+  }
+
+  return result.data;
+}
+
+async function extractWithRetry(
+  systemPrompt: string,
+  userMessage: string,
+  apiKey: string,
+  context: string,
+): Promise<ExtractionResult> {
+  let rawText = await callClaudeWithJsonSchema(systemPrompt, userMessage, apiKey, 1024);
+
+  if (!rawText) {
+    rawText = await callClaude(systemPrompt, userMessage, apiKey, 1024);
+  }
+
+  let firstError: Error | null = null;
+  try {
+    return parseAndValidateExtraction(rawText, context);
+  } catch (err) {
+    firstError = err instanceof Error ? err : new Error(String(err));
+    console.warn(`[ingest] First parse attempt failed (${context}), retrying...`);
+  }
+
+  const retryRaw = await callClaude(systemPrompt, userMessage, apiKey, 1024);
+
+  try {
+    return parseAndValidateExtraction(retryRaw, `${context}-retry`);
+  } catch {
+    console.error(`[ingest] Retry also failed (${context}). Original error:`, firstError?.message);
+    throw firstError ?? new Error(`Extraction failed after retry (${context})`);
   }
 }
 
@@ -154,17 +278,6 @@ Rules:
 const SUMMARY_SYSTEM_PROMPT = `You write concise, factual summaries for a toddler-friendly restaurant guide.
 Given a list of evidence phrases, write one plain-English sentence (max 30 words) summarising whether the venue is good for toddlers and why.
 Be specific. Do not start with "This restaurant". Return only the sentence.`;
-
-interface ExtractionResult {
-  high_chairs: boolean | "unknown";
-  pram_space: boolean | "unknown";
-  changing_table: boolean | "unknown";
-  kids_menu: boolean | "unknown";
-  staff_child_friendly: boolean | "unknown";
-  noise_tolerant: boolean | "unknown";
-  negative_signals: string[];
-  evidence_quotes: string[];
-}
 
 function scoreExtraction(e: ExtractionResult): {
   toddler_score: number;
@@ -245,10 +358,12 @@ async function runAnalysis(
 }> {
   const truncated = truncateReviews(reviews);
   const reviewBlock = truncated.map((r, i) => `Review ${i + 1}:\n${r}`).join("\n\n");
-  const rawExtraction = await callClaude(EXTRACTION_SYSTEM_PROMPT, reviewBlock, anthropicKey, 1024);
-  const extracted = parseJson<ExtractionResult>(rawExtraction);
 
-  if (!extracted) {
+  let extracted: ExtractionResult;
+  try {
+    extracted = await extractWithRetry(EXTRACTION_SYSTEM_PROMPT, reviewBlock, anthropicKey, "ingest-extraction");
+  } catch (err) {
+    console.error("[ingest] Extraction failed after retry:", err instanceof Error ? err.message : err);
     return {
       toddler_score: 2.5,
       confidence: 0.1,
@@ -265,8 +380,8 @@ async function runAnalysis(
   const confidencePenalty = reviewSource === "fallback" ? 0.7 : 1;
   const scorePenalty = reviewSource === "fallback" ? 0.9 : 1;
 
-  const evidenceQuotes = (extracted.evidence_quotes ?? []).slice(0, 5);
-  const aiNegativeSignals = extracted.negative_signals ?? [];
+  const evidenceQuotes = extracted.evidence_quotes.slice(0, 5);
+  const aiNegativeSignals = extracted.negative_signals;
 
   const evidenceSentences = [...evidenceQuotes, ...aiNegativeSignals];
   let summary = "No summary available.";
@@ -360,7 +475,6 @@ Deno.serve(async (req: Request) => {
       allReviews = await fetchReviewsFromGoogle(effectivePlaceId, googleKey);
       newReviewFetch = new Date().toISOString();
       googleApiCalled = true;
-    } else if (!reviewsNeedRefresh && allReviews.length > 0) {
     }
 
     const filtered = filterToddlerReviews(allReviews);

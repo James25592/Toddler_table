@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { AnalysisResult, StructuredExtractionResult } from './types';
 
 import {
@@ -26,6 +27,46 @@ export class AnalysisError extends Error {
     this.name = 'AnalysisError';
   }
 }
+
+const FeaturePresenceSchema = z.union([z.boolean(), z.literal('unknown')]);
+
+export const ExtractionResultSchema = z.object({
+  high_chairs: FeaturePresenceSchema,
+  pram_space: FeaturePresenceSchema,
+  changing_table: FeaturePresenceSchema,
+  kids_menu: FeaturePresenceSchema,
+  staff_child_friendly: FeaturePresenceSchema,
+  noise_tolerant: FeaturePresenceSchema,
+  negative_signals: z.array(z.string()),
+  evidence_quotes: z.array(z.string()),
+});
+
+export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
+
+const EXTRACTION_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    high_chairs: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
+    pram_space: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
+    changing_table: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
+    kids_menu: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
+    staff_child_friendly: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
+    noise_tolerant: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
+    negative_signals: { type: 'array', items: { type: 'string' } },
+    evidence_quotes: { type: 'array', items: { type: 'string' } },
+  },
+  required: [
+    'high_chairs',
+    'pram_space',
+    'changing_table',
+    'kids_menu',
+    'staff_child_friendly',
+    'noise_tolerant',
+    'negative_signals',
+    'evidence_quotes',
+  ],
+  additionalProperties: false,
+};
 
 async function callClaude(
   systemPrompt: string,
@@ -74,22 +115,125 @@ async function callClaude(
   return data.content?.[0]?.text ?? '';
 }
 
-function parseJson<T>(raw: string, context: string): T {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) {
-    throw new AnalysisError(`No parseable JSON in Claude response (${context})`);
-  }
+async function callClaudeWithJsonSchema(
+  systemPrompt: string,
+  userMessage: string,
+  apiKey: string,
+  maxTokens = 1024,
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLAUDE_TIMEOUT_MS);
+
+  let response: Response;
   try {
-    return JSON.parse(match[0]) as T;
-  } catch {
-    throw new AnalysisError(`Failed to parse JSON from Claude response (${context})`);
+    response = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'json-output-1',
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'extraction_result',
+            schema: EXTRACTION_JSON_SCHEMA,
+            strict: true,
+          },
+        },
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new AnalysisError('Claude API request timed out', 504);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
+
+  if (!response.ok) {
+    const body = await response.text();
+    if (response.status === 400 || response.status === 404) {
+      return '';
+    }
+    throw new AnalysisError(
+      `Claude API error: ${response.status} — ${body}`,
+      response.status,
+    );
+  }
+
+  const data = await response.json();
+  return data.content?.[0]?.text ?? '';
 }
 
-const FEATURE_PRESENCE_VALUES = new Set([true, false, 'unknown']);
+function parseAndValidateExtraction(raw: string, context: string): ExtractionResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.error(`[analyse] JSON parse failed (${context}):`, raw.slice(0, 500));
+    throw new AnalysisError(`Failed to parse JSON from Claude response (${context})`);
+  }
 
-function isFeaturePresence(v: unknown): v is boolean | 'unknown' {
-  return FEATURE_PRESENCE_VALUES.has(v as boolean | 'unknown');
+  const result = ExtractionResultSchema.safeParse(parsed);
+  if (!result.success) {
+    console.error(`[analyse] Zod validation failed (${context}):`, result.error.format(), 'raw:', raw.slice(0, 500));
+    throw new AnalysisError(`Invalid extraction schema from Claude (${context}): ${result.error.message}`);
+  }
+
+  return result.data;
+}
+
+async function extractWithRetry(
+  userMessage: string,
+  apiKey: string,
+  context: string,
+): Promise<ExtractionResult> {
+  let rawText = await callClaudeWithJsonSchema(
+    TODDLER_STRUCTURED_EXTRACTION_SYSTEM_PROMPT,
+    userMessage,
+    apiKey,
+    1024,
+  );
+
+  if (!rawText) {
+    rawText = await callClaude(
+      TODDLER_STRUCTURED_EXTRACTION_SYSTEM_PROMPT,
+      userMessage,
+      apiKey,
+      1024,
+    );
+  }
+
+  let firstError: Error | null = null;
+  try {
+    return parseAndValidateExtraction(rawText, context);
+  } catch (err) {
+    firstError = err instanceof Error ? err : new Error(String(err));
+    console.warn(`[analyse] First parse attempt failed (${context}), retrying...`);
+  }
+
+  const retryRaw = await callClaude(
+    TODDLER_STRUCTURED_EXTRACTION_SYSTEM_PROMPT,
+    userMessage,
+    apiKey,
+    1024,
+  );
+
+  try {
+    return parseAndValidateExtraction(retryRaw, `${context}-retry`);
+  } catch {
+    console.error(`[analyse] Retry also failed (${context}). Original error:`, firstError?.message);
+    throw firstError ?? new AnalysisError(`Extraction failed after retry (${context})`);
+  }
 }
 
 export async function extractStructuredEvidence(
@@ -97,34 +241,7 @@ export async function extractStructuredEvidence(
   apiKey: string,
 ): Promise<StructuredExtractionResult> {
   const userMessage = buildStructuredExtractionPrompt(reviews);
-  const rawText = await callClaude(
-    TODDLER_STRUCTURED_EXTRACTION_SYSTEM_PROMPT,
-    userMessage,
-    apiKey,
-    1024,
-  );
-  const parsed = parseJson<Record<string, unknown>>(rawText, 'structured-extraction');
-
-  function toPresence(v: unknown): boolean | 'unknown' {
-    if (isFeaturePresence(v)) return v;
-    return 'unknown';
-  }
-
-  function toStringArray(v: unknown): string[] {
-    if (!Array.isArray(v)) return [];
-    return v.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
-  }
-
-  return {
-    high_chairs: toPresence(parsed.high_chairs),
-    pram_space: toPresence(parsed.pram_space),
-    changing_table: toPresence(parsed.changing_table),
-    kids_menu: toPresence(parsed.kids_menu),
-    staff_child_friendly: toPresence(parsed.staff_child_friendly),
-    noise_tolerant: toPresence(parsed.noise_tolerant),
-    negative_signals: toStringArray(parsed.negative_signals),
-    evidence_quotes: toStringArray(parsed.evidence_quotes),
-  };
+  return extractWithRetry(userMessage, apiKey, 'structured-extraction');
 }
 
 const MAX_REVIEWS_CHARS = 3000;

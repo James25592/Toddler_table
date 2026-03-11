@@ -16,7 +16,13 @@ export type ToddlerCategory =
 export interface AnalysisSignal {
   category: ToddlerCategory | EvidenceCategory;
   evidence: string;
-  source?: 'review' | 'web_mention';
+  source?: 'review' | 'web_mention' | 'venue_profile';
+}
+
+export interface SignalBreakdown {
+  venue_profile: Array<{ label: string; delta: number }>;
+  ai_review_signals: AnalysisSignal[];
+  parent_confirmations: AnalysisSignal[];
 }
 
 export interface AnalysisResult {

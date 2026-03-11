@@ -1,10 +1,12 @@
-import { AnalysisSignal, EvidenceExtractionResult, EvidenceSignal, FeatureEvidence, StressLevel, StressResult, StructuredExtractionResult, ToddlerCategory } from './types';
+import { AnalysisSignal, EvidenceExtractionResult, EvidenceSignal, FeatureEvidence, SignalBreakdown, StressLevel, StressResult, StructuredExtractionResult, ToddlerCategory } from './types';
+import { VenueProfileSignal } from './venueProfile';
 
 interface ScoringResult {
   positive_signals: AnalysisSignal[];
   negative_signals: AnalysisSignal[];
   toddler_score: number;
   confidence: number;
+  signal_breakdown: SignalBreakdown;
 }
 
 const SCORE_MAP: Partial<Record<string, { sentiment: 'positive' | 'negative'; delta: number }>> = {
@@ -59,7 +61,17 @@ export function scoreEvidenceSignals(input: EvidenceExtractionResult): ScoringRe
   const toddler_score = Math.min(5, Math.max(0, score));
   const confidence = confidenceFromCount(input.evidence.length);
 
-  return { positive_signals, negative_signals, toddler_score, confidence };
+  return {
+    positive_signals,
+    negative_signals,
+    toddler_score,
+    confidence,
+    signal_breakdown: {
+      venue_profile: [],
+      ai_review_signals: [...positive_signals, ...negative_signals],
+      parent_confirmations: [],
+    },
+  };
 }
 
 const DIFFICULT_CATEGORIES = new Set([
@@ -104,10 +116,14 @@ function evidenceCount(featureEvidence: FeatureEvidence, key: keyof FeatureEvide
   return featureEvidence[key]?.length ?? 0;
 }
 
-export function scoreStructuredExtraction(input: StructuredExtractionResult): ScoringResult {
+export function scoreStructuredExtraction(
+  input: StructuredExtractionResult,
+  venueProfileSignals: VenueProfileSignal[] = [],
+  venueProfileAdjustment = 0,
+): ScoringResult {
   const positive_signals: AnalysisSignal[] = [];
   const negative_signals: AnalysisSignal[] = [];
-  let score = 2.5;
+  let score = 2.5 + venueProfileAdjustment;
   let signalCount = 0;
 
   const fe = input.feature_evidence;
@@ -150,9 +166,22 @@ export function scoreStructuredExtraction(input: StructuredExtractionResult): Sc
   const toddler_score = Math.min(5, Math.max(0, score));
   const confidence = confidenceFromCount(signalCount);
 
+  console.log(`[scoring] Venue profile adjustment: ${venueProfileAdjustment.toFixed(2)} (${venueProfileSignals.length} signal(s))`);
   console.log(`[scoring] Final score: ${toddler_score.toFixed(2)}, confidence: ${confidence.toFixed(2)}, signals: ${signalCount}`);
 
-  return { positive_signals, negative_signals, toddler_score, confidence };
+  const aiSignals: AnalysisSignal[] = [...positive_signals, ...negative_signals];
+
+  return {
+    positive_signals,
+    negative_signals,
+    toddler_score,
+    confidence,
+    signal_breakdown: {
+      venue_profile: venueProfileSignals.map((s) => ({ label: s.label, delta: s.delta })),
+      ai_review_signals: aiSignals,
+      parent_confirmations: [],
+    },
+  };
 }
 
 export function computeStressLevel(

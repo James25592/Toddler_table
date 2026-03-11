@@ -29,6 +29,9 @@ interface IngestionRequest {
   image_url?: string;
   restaurant_id?: string;
   force_refresh?: boolean;
+  primary_type?: string;
+  secondary_types?: string[];
+  price_level?: number | null;
 }
 
 interface DbRestaurant {
@@ -111,6 +114,85 @@ const EXTRACTION_JSON_SCHEMA = {
   ],
   additionalProperties: false,
 };
+
+const VENUE_PROFILE_SCORE_CAP = 1.5;
+const CAFE_TYPES = ["cafe", "coffee_shop", "bakery", "tea_house", "sandwich_shop"];
+const PUB_TYPES = ["bar", "pub"];
+const TAKEAWAY_TYPES = ["fast_food_restaurant", "meal_takeaway", "takeaway"];
+const FINE_DINING_TYPES = ["fine_dining_restaurant"];
+const CASUAL_NAME_KWS = ["kitchen", "trattoria", "pizzeria", "grill", "bistro", "brasserie", "diner", "eatery"];
+const BAR_NAME_KWS = ["bar", "cocktail", "wine bar", "lounge"];
+
+interface VenueProfileSignal {
+  label: string;
+  delta: number;
+}
+
+function inferAndScoreVenueProfile(
+  name: string,
+  primaryType?: string,
+  secondaryTypes?: string[],
+  price_level?: number | null,
+  rating?: number | null,
+  user_ratings_total?: number | null,
+): { adjustment: number; signals: VenueProfileSignal[] } {
+  const nameLower = name.toLowerCase();
+  const allTypes = [
+    ...(primaryType ? [primaryType] : []),
+    ...(secondaryTypes ?? []),
+  ].map((t) => t.toLowerCase());
+
+  const is_cafe_style = CAFE_TYPES.some((t) => allTypes.includes(t));
+  const is_pub_style = PUB_TYPES.some((t) => allTypes.includes(t));
+  const is_takeaway_heavy = TAKEAWAY_TYPES.some((t) => allTypes.includes(t));
+  const is_fine_dining =
+    FINE_DINING_TYPES.some((t) => allTypes.includes(t)) ||
+    (price_level != null && price_level >= 3);
+
+  const hasBarName = BAR_NAME_KWS.some((kw) => nameLower.includes(kw));
+  const is_brunch_spot = nameLower.includes("brunch");
+  const is_casual_dining =
+    CASUAL_NAME_KWS.some((kw) => nameLower.includes(kw)) ||
+    (!is_fine_dining && !is_takeaway_heavy && !is_cafe_style && !is_pub_style && !hasBarName);
+
+  const highRatingHighVolume =
+    (rating ?? 0) >= 4.4 && (user_ratings_total ?? 0) > 300;
+
+  const is_likely_family_friendly =
+    is_cafe_style || is_pub_style || is_brunch_spot || highRatingHighVolume ||
+    (!is_fine_dining && !hasBarName && is_casual_dining);
+
+  const likely_noise_tolerant = is_cafe_style || is_pub_style || is_brunch_spot;
+  const likely_spacious =
+    (price_level == null || price_level <= 1) && highRatingHighVolume;
+
+  const signals: VenueProfileSignal[] = [];
+  let raw = 0;
+
+  if (is_likely_family_friendly) {
+    signals.push({ label: "Likely family friendly venue type", delta: 0.5 });
+    raw += 0.5;
+  }
+  if (likely_noise_tolerant) {
+    signals.push({ label: "Venue type typically noise tolerant", delta: 0.4 });
+    raw += 0.4;
+  }
+  if (likely_spacious) {
+    signals.push({ label: "Venue likely has spacious layout", delta: 0.3 });
+    raw += 0.3;
+  }
+  if (is_fine_dining) {
+    signals.push({ label: "Fine dining — less toddler friendly", delta: -0.6 });
+    raw -= 0.6;
+  }
+  if (hasBarName && !is_pub_style) {
+    signals.push({ label: "Bar or cocktail venue name — less toddler friendly", delta: -1.0 });
+    raw -= 1.0;
+  }
+
+  const adjustment = Math.max(-VENUE_PROFILE_SCORE_CAP, Math.min(VENUE_PROFILE_SCORE_CAP, raw));
+  return { adjustment, signals };
+}
 
 function slugify(name: string): string {
   return name
@@ -330,15 +412,24 @@ const FEATURE_WEIGHTS: Record<string, FeatureWeightConfig> = {
   noise_tolerant:       { category: "family_friendly",       delta: 1, minEvidence: 1 },
 };
 
-function scoreExtraction(e: ExtractionResult): {
+function scoreExtraction(
+  e: ExtractionResult,
+  venueAdjustment = 0,
+  venueSignals: VenueProfileSignal[] = [],
+): {
   toddler_score: number;
   confidence: number;
   positive_signals: object[];
   negative_signals: object[];
+  signal_breakdown: {
+    venue_profile: VenueProfileSignal[];
+    ai_review_signals: object[];
+    parent_confirmations: object[];
+  };
 } {
   const positiveSignals: { category: string; evidence: string }[] = [];
   const negativeSignals: { category: string; evidence: string }[] = [];
-  let score = 2.5;
+  let score = 2.5 + venueAdjustment;
   let signalCount = 0;
 
   const fe: FeatureEvidence = e.feature_evidence;
@@ -382,6 +473,7 @@ function scoreExtraction(e: ExtractionResult): {
   const confidence =
     signalCount >= 4 ? 0.85 : signalCount >= 2 ? 0.6 : signalCount >= 1 ? 0.3 : 0.1;
 
+  console.log(`[scoring] Venue profile adjustment: ${venueAdjustment.toFixed(2)} (${venueSignals.length} signal(s))`);
   console.log(`[scoring] Final score: ${toddler_score.toFixed(2)}, confidence: ${confidence.toFixed(2)}, signals: ${signalCount}`);
 
   return {
@@ -389,6 +481,11 @@ function scoreExtraction(e: ExtractionResult): {
     confidence,
     positive_signals: positiveSignals,
     negative_signals: negativeSignals,
+    signal_breakdown: {
+      venue_profile: venueSignals,
+      ai_review_signals: [...positiveSignals, ...negativeSignals],
+      parent_confirmations: [],
+    },
   };
 }
 
@@ -396,6 +493,12 @@ async function runAnalysis(
   reviews: string[],
   reviewSource: "filtered" | "fallback",
   anthropicKey: string,
+  venueName: string,
+  primaryType?: string,
+  secondaryTypes?: string[],
+  price_level?: number | null,
+  google_rating?: number | null,
+  google_review_count?: number | null,
 ): Promise<{
   toddler_score: number;
   confidence: number;
@@ -405,7 +508,19 @@ async function runAnalysis(
   evidence_quotes: string[];
   ai_negative_signals: string[];
   toddler_features: Record<string, unknown>;
+  signal_breakdown: object;
 }> {
+  const { adjustment: venueAdjustment, signals: venueSignals } = inferAndScoreVenueProfile(
+    venueName,
+    primaryType,
+    secondaryTypes,
+    price_level,
+    google_rating,
+    google_review_count,
+  );
+
+  console.log(`[ingest] Venue profile for "${venueName}": adjustment=${venueAdjustment.toFixed(2)}, signals=${venueSignals.length}`);
+
   const truncated = truncateReviews(reviews);
   const reviewBlock = truncated.map((r, i) => `Review ${i + 1}:\n${r}`).join("\n\n");
 
@@ -414,8 +529,9 @@ async function runAnalysis(
     extracted = await extractWithRetry(EXTRACTION_SYSTEM_PROMPT, reviewBlock, anthropicKey, "ingest-extraction");
   } catch (err) {
     console.error("[ingest] Extraction failed after retry:", err instanceof Error ? err.message : err);
+    const fallbackScore = Math.min(5, Math.max(0, 2.5 + venueAdjustment));
     return {
-      toddler_score: 2.5,
+      toddler_score: fallbackScore,
       confidence: 0.1,
       summary: "Unable to analyse reviews.",
       positive_signals: [],
@@ -423,10 +539,11 @@ async function runAnalysis(
       evidence_quotes: [],
       ai_negative_signals: [],
       toddler_features: {},
+      signal_breakdown: { venue_profile: venueSignals, ai_review_signals: [], parent_confirmations: [] },
     };
   }
 
-  const scored = scoreExtraction(extracted);
+  const scored = scoreExtraction(extracted, venueAdjustment, venueSignals);
   const confidencePenalty = reviewSource === "fallback" ? 0.7 : 1;
   const scorePenalty = reviewSource === "fallback" ? 0.9 : 1;
 
@@ -458,6 +575,7 @@ async function runAnalysis(
       staff_child_friendly: extracted.staff_child_friendly,
       noise_tolerant: extracted.noise_tolerant,
     },
+    signal_breakdown: scored.signal_breakdown,
   };
 }
 
@@ -493,6 +611,9 @@ Deno.serve(async (req: Request) => {
       image_url,
       restaurant_id,
       force_refresh = false,
+      primary_type,
+      secondary_types,
+      price_level,
     } = body;
 
     if (!name) {
@@ -534,7 +655,17 @@ Deno.serve(async (req: Request) => {
     let analysisResult: Awaited<ReturnType<typeof runAnalysis>> | null = null;
 
     if (reviewsToAnalyse.length > 0) {
-      analysisResult = await runAnalysis(reviewsToAnalyse, reviewSource, anthropicKey);
+      analysisResult = await runAnalysis(
+        reviewsToAnalyse,
+        reviewSource,
+        anthropicKey,
+        name,
+        primary_type,
+        secondary_types,
+        price_level,
+        google_rating ?? row?.google_rating ?? null,
+        google_review_count ?? row?.google_review_count ?? null,
+      );
     }
 
     const upsertPayload: Record<string, unknown> = {
@@ -561,6 +692,7 @@ Deno.serve(async (req: Request) => {
       upsertPayload.evidence_quotes = analysisResult.evidence_quotes;
       upsertPayload.ai_negative_signals = analysisResult.ai_negative_signals;
       upsertPayload.toddler_features = analysisResult.toddler_features;
+      upsertPayload.signal_breakdown = analysisResult.signal_breakdown;
     }
 
     const { error: upsertError } = await supabase

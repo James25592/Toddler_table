@@ -16,6 +16,7 @@ import { fetchExternalRestaurantMentions } from './search';
 import { prepareReviewContext } from './reviewPreparation';
 import { fetchSubmissionsForRestaurant } from './submissions';
 import { fetchDetailedSubmissions } from './detailedSubmissions';
+import { inferVenueProfile, scoreVenueProfile, VenueProfileInput } from './venueProfile';
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-3-5-haiku-20241022';
@@ -326,6 +327,7 @@ export async function analyseRestaurantReviews(
   review_source: 'filtered' | 'fallback',
   place_id?: string,
   restaurantName?: string,
+  venueMeta?: VenueProfileInput,
 ): Promise<AnalysisResult & { _filtered_sentences: string[] }> {
   try {
     if (place_id) {
@@ -400,7 +402,16 @@ export async function analyseRestaurantReviews(
       };
     }
 
-    const scored = scoreStructuredExtraction(extracted);
+    const profileInput: VenueProfileInput = venueMeta ?? { name: restaurantName ?? '' };
+    const profile = inferVenueProfile(profileInput);
+    const { adjustment: venueAdjustment, signals: venueSignals } = scoreVenueProfile(
+      profile,
+      profileInput.name.toLowerCase(),
+    );
+
+    console.log(`[analyse] Venue profile for "${profileInput.name}": adjustment=${venueAdjustment.toFixed(2)}, signals=${venueSignals.length}`);
+
+    const scored = scoreStructuredExtraction(extracted, venueSignals, venueAdjustment);
 
     const confidence =
       review_source === 'fallback'
@@ -434,6 +445,7 @@ export async function analyseRestaurantReviews(
       confidence,
       summary,
       _filtered_sentences: evidenceSentences,
+      signal_breakdown: scored.signal_breakdown,
     };
 
     if (place_id) {

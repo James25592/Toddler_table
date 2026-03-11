@@ -70,6 +70,15 @@ export interface EvidenceExtractionResult {
 
 export type FeaturePresence = true | false | 'unknown';
 
+export interface FeatureEvidence {
+  high_chairs: string[];
+  pram_space: string[];
+  changing_table: string[];
+  kids_menu: string[];
+  staff_child_friendly: string[];
+  noise_tolerant: string[];
+}
+
 export interface StructuredExtractionResult {
   high_chairs: FeaturePresence;
   pram_space: FeaturePresence;
@@ -79,6 +88,7 @@ export interface StructuredExtractionResult {
   noise_tolerant: FeaturePresence;
   negative_signals: string[];
   evidence_quotes: string[];
+  feature_evidence: FeatureEvidence;
 }
 
 export interface ReviewEvidence {

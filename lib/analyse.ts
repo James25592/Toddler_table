@@ -30,6 +30,15 @@ export class AnalysisError extends Error {
 
 const FeaturePresenceSchema = z.union([z.boolean(), z.literal('unknown')]);
 
+const FeatureEvidenceSchema = z.object({
+  high_chairs: z.array(z.string()),
+  pram_space: z.array(z.string()),
+  changing_table: z.array(z.string()),
+  kids_menu: z.array(z.string()),
+  staff_child_friendly: z.array(z.string()),
+  noise_tolerant: z.array(z.string()),
+});
+
 export const ExtractionResultSchema = z.object({
   high_chairs: FeaturePresenceSchema,
   pram_space: FeaturePresenceSchema,
@@ -39,9 +48,24 @@ export const ExtractionResultSchema = z.object({
   noise_tolerant: FeaturePresenceSchema,
   negative_signals: z.array(z.string()),
   evidence_quotes: z.array(z.string()),
+  feature_evidence: FeatureEvidenceSchema,
 });
 
 export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
+
+const FEATURE_EVIDENCE_SCHEMA = {
+  type: 'object',
+  properties: {
+    high_chairs: { type: 'array', items: { type: 'string' } },
+    pram_space: { type: 'array', items: { type: 'string' } },
+    changing_table: { type: 'array', items: { type: 'string' } },
+    kids_menu: { type: 'array', items: { type: 'string' } },
+    staff_child_friendly: { type: 'array', items: { type: 'string' } },
+    noise_tolerant: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['high_chairs', 'pram_space', 'changing_table', 'kids_menu', 'staff_child_friendly', 'noise_tolerant'],
+  additionalProperties: false,
+};
 
 const EXTRACTION_JSON_SCHEMA = {
   type: 'object',
@@ -54,6 +78,7 @@ const EXTRACTION_JSON_SCHEMA = {
     noise_tolerant: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
     negative_signals: { type: 'array', items: { type: 'string' } },
     evidence_quotes: { type: 'array', items: { type: 'string' } },
+    feature_evidence: FEATURE_EVIDENCE_SCHEMA,
   },
   required: [
     'high_chairs',
@@ -64,6 +89,7 @@ const EXTRACTION_JSON_SCHEMA = {
     'noise_tolerant',
     'negative_signals',
     'evidence_quotes',
+    'feature_evidence',
   ],
   additionalProperties: false,
 };

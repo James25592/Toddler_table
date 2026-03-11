@@ -168,7 +168,15 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
   "staff_child_friendly": true | false | "unknown",
   "noise_tolerant": true | false | "unknown",
   "negative_signals": ["short description of negative finding"],
-  "evidence_quotes": ["exact short quote from a review"]
+  "evidence_quotes": ["exact short quote from a review"],
+  "feature_evidence": {
+    "high_chairs": ["verbatim quote supporting this feature"],
+    "pram_space": ["verbatim quote supporting this feature"],
+    "changing_table": ["verbatim quote supporting this feature"],
+    "kids_menu": ["verbatim quote supporting this feature"],
+    "staff_child_friendly": ["verbatim quote supporting this feature"],
+    "noise_tolerant": ["verbatim quote supporting this feature"]
+  }
 }
 
 Rules:
@@ -177,6 +185,7 @@ Rules:
 - Use "unknown" if there is no evidence either way — never guess.
 - negative_signals: list short plain-English descriptions of negative findings (e.g. "Too cramped for a buggy", "Staff seemed annoyed by children").
 - evidence_quotes: extract short verbatim quotes (under 20 words each) from the reviews that directly support your conclusions. Include both positive and negative supporting quotes.
+- feature_evidence: for EACH feature, list every verbatim quote (under 20 words each) that supports that specific feature. Use an empty array if there is no evidence. Each supporting quote counts separately — if two reviews both mention high chairs, list both quotes.
 - If no toddler-relevant information exists in the reviews, return "unknown" for all features and empty arrays.
 
 Evidence phrases to look for:

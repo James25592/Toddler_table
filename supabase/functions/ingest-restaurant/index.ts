@@ -47,6 +47,15 @@ interface DbRestaurant {
 
 const FeaturePresenceSchema = z.union([z.boolean(), z.literal("unknown")]);
 
+const FeatureEvidenceSchema = z.object({
+  high_chairs: z.array(z.string()),
+  pram_space: z.array(z.string()),
+  changing_table: z.array(z.string()),
+  kids_menu: z.array(z.string()),
+  staff_child_friendly: z.array(z.string()),
+  noise_tolerant: z.array(z.string()),
+});
+
 const ExtractionResultSchema = z.object({
   high_chairs: FeaturePresenceSchema,
   pram_space: FeaturePresenceSchema,
@@ -56,9 +65,25 @@ const ExtractionResultSchema = z.object({
   noise_tolerant: FeaturePresenceSchema,
   negative_signals: z.array(z.string()),
   evidence_quotes: z.array(z.string()),
+  feature_evidence: FeatureEvidenceSchema,
 });
 
 type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
+type FeatureEvidence = z.infer<typeof FeatureEvidenceSchema>;
+
+const FEATURE_EVIDENCE_SCHEMA = {
+  type: "object",
+  properties: {
+    high_chairs: { type: "array", items: { type: "string" } },
+    pram_space: { type: "array", items: { type: "string" } },
+    changing_table: { type: "array", items: { type: "string" } },
+    kids_menu: { type: "array", items: { type: "string" } },
+    staff_child_friendly: { type: "array", items: { type: "string" } },
+    noise_tolerant: { type: "array", items: { type: "string" } },
+  },
+  required: ["high_chairs", "pram_space", "changing_table", "kids_menu", "staff_child_friendly", "noise_tolerant"],
+  additionalProperties: false,
+};
 
 const EXTRACTION_JSON_SCHEMA = {
   type: "object",
@@ -71,6 +96,7 @@ const EXTRACTION_JSON_SCHEMA = {
     noise_tolerant: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
     negative_signals: { type: "array", items: { type: "string" } },
     evidence_quotes: { type: "array", items: { type: "string" } },
+    feature_evidence: FEATURE_EVIDENCE_SCHEMA,
   },
   required: [
     "high_chairs",
@@ -81,6 +107,7 @@ const EXTRACTION_JSON_SCHEMA = {
     "noise_tolerant",
     "negative_signals",
     "evidence_quotes",
+    "feature_evidence",
   ],
   additionalProperties: false,
 };
@@ -266,18 +293,42 @@ Given a set of reviews, extract the following information and return it as JSON:
   "staff_child_friendly": true | false | "unknown",
   "noise_tolerant": true | false | "unknown",
   "negative_signals": ["short plain-English description of each concern"],
-  "evidence_quotes": ["verbatim short quote from reviews (max 120 chars each)"]
+  "evidence_quotes": ["verbatim short quote from reviews (max 120 chars each)"],
+  "feature_evidence": {
+    "high_chairs": ["verbatim quote supporting this feature (max 120 chars)"],
+    "pram_space": ["verbatim quote supporting this feature (max 120 chars)"],
+    "changing_table": ["verbatim quote supporting this feature (max 120 chars)"],
+    "kids_menu": ["verbatim quote supporting this feature (max 120 chars)"],
+    "staff_child_friendly": ["verbatim quote supporting this feature (max 120 chars)"],
+    "noise_tolerant": ["verbatim quote supporting this feature (max 120 chars)"]
+  }
 }
 
 Rules:
 - Only set true/false if there is clear evidence. Use "unknown" if not mentioned.
 - negative_signals: list specific concerns (cramped, loud, not welcoming, etc.)
 - evidence_quotes: pick 3-5 concise verbatim phrases that best illustrate toddler-friendliness.
+- feature_evidence: for EACH feature, list every verbatim quote that directly supports it. Use an empty array if there is no evidence. If multiple reviews mention the same feature, include a quote from each.
 - Return only the JSON object, no prose.`;
 
 const SUMMARY_SYSTEM_PROMPT = `You write concise, factual summaries for a toddler-friendly restaurant guide.
 Given a list of evidence phrases, write one plain-English sentence (max 30 words) summarising whether the venue is good for toddlers and why.
 Be specific. Do not start with "This restaurant". Return only the sentence.`;
+
+interface FeatureWeightConfig {
+  category: string;
+  delta: number;
+  minEvidence: number;
+}
+
+const FEATURE_WEIGHTS: Record<string, FeatureWeightConfig> = {
+  high_chairs:          { category: "high_chair",            delta: 2, minEvidence: 2 },
+  kids_menu:            { category: "kids_menu",             delta: 2, minEvidence: 2 },
+  pram_space:           { category: "pram_space",            delta: 1, minEvidence: 1 },
+  changing_table:       { category: "changing_table",        delta: 1, minEvidence: 1 },
+  staff_child_friendly: { category: "staff_child_friendly",  delta: 1, minEvidence: 1 },
+  noise_tolerant:       { category: "family_friendly",       delta: 1, minEvidence: 1 },
+};
 
 function scoreExtraction(e: ExtractionResult): {
   toddler_score: number;
@@ -285,57 +336,56 @@ function scoreExtraction(e: ExtractionResult): {
   positive_signals: object[];
   negative_signals: object[];
 } {
-  const catMap: Record<string, string> = {
-    high_chairs: "high_chair",
-    pram_space: "pram_space",
-    changing_table: "changing_table",
-    kids_menu: "kids_menu",
-    staff_child_friendly: "staff_child_friendly",
-    noise_tolerant: "family_friendly",
-  };
   const positiveSignals: { category: string; evidence: string }[] = [];
   const negativeSignals: { category: string; evidence: string }[] = [];
-
   let score = 2.5;
-  const keys = [
-    "high_chairs",
-    "kids_menu",
-    "pram_space",
-    "changing_table",
-    "staff_child_friendly",
-    "noise_tolerant",
-  ] as const;
-  const highWeight = new Set(["high_chairs", "kids_menu"]);
+  let signalCount = 0;
 
-  for (const key of keys) {
-    const val = e[key];
-    const cat = catMap[key];
-    const weight = highWeight.has(key) ? 2 : 1;
+  const fe: FeatureEvidence = e.feature_evidence;
+
+  for (const [key, weight] of Object.entries(FEATURE_WEIGHTS)) {
+    const feKey = key as keyof FeatureEvidence;
+    const val = e[feKey];
+    const quotes = fe[feKey]?.length ?? 0;
+
     if (val === true) {
-      score += weight;
-      positiveSignals.push({
-        category: cat,
-        evidence: `${key.replace(/_/g, " ")} confirmed in reviews.`,
-      });
+      if (quotes >= weight.minEvidence) {
+        score += weight.delta;
+        signalCount++;
+        positiveSignals.push({ category: weight.category, evidence: fe[feKey][0] ?? "" });
+        console.log(`[scoring] ACCEPTED ${key}: true — ${quotes} quote(s) (required ${weight.minEvidence}) → +${weight.delta}`);
+      } else {
+        console.log(`[scoring] REJECTED ${key}: true — only ${quotes} quote(s), required ${weight.minEvidence} → treated as unknown`);
+      }
     } else if (val === false) {
-      score -= weight;
-      negativeSignals.push({
-        category: cat,
-        evidence: `No ${key.replace(/_/g, " ")} available.`,
-      });
+      if (quotes >= weight.minEvidence) {
+        score -= weight.delta;
+        signalCount++;
+        negativeSignals.push({ category: weight.category, evidence: fe[feKey][0] ?? "" });
+        console.log(`[scoring] ACCEPTED ${key}: false — ${quotes} quote(s) (required ${weight.minEvidence}) → -${weight.delta}`);
+      } else {
+        console.log(`[scoring] REJECTED ${key}: false — only ${quotes} quote(s), required ${weight.minEvidence} → treated as unknown`);
+      }
+    } else {
+      console.log(`[scoring] SKIPPED ${key}: unknown`);
     }
   }
 
   for (const sig of e.negative_signals) {
     negativeSignals.push({ category: "not_child_friendly", evidence: sig });
+    score -= 1;
+    signalCount++;
+    console.log(`[scoring] ACCEPTED negative_signal: "${sig}" → -1`);
   }
 
-  const signalCount = positiveSignals.length + negativeSignals.length;
+  const toddler_score = Math.min(5, Math.max(0, score));
   const confidence =
     signalCount >= 4 ? 0.85 : signalCount >= 2 ? 0.6 : signalCount >= 1 ? 0.3 : 0.1;
 
+  console.log(`[scoring] Final score: ${toddler_score.toFixed(2)}, confidence: ${confidence.toFixed(2)}, signals: ${signalCount}`);
+
   return {
-    toddler_score: Math.min(5, Math.max(0, score)),
+    toddler_score,
     confidence,
     positive_signals: positiveSignals,
     negative_signals: negativeSignals,

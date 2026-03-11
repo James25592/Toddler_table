@@ -15,6 +15,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   noise_issue: 'Noise concern',
   cramped: 'Cramped seating',
   not_child_friendly: 'Not child-friendly',
+  staff_unfriendly: 'Unfriendly staff',
   'high chairs available': 'High chair available',
   'kids menu': 'Kids menu',
   'spacious seating': 'Spacious seating',

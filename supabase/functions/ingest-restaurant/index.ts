@@ -402,6 +402,7 @@ Be specific. Do not start with "This restaurant". Return only the sentence.`;
 
 interface FeatureWeightConfig {
   category: string;
+  negativeCategory?: string;
   delta: number;
   minEvidence: number;
 }
@@ -411,8 +412,8 @@ const FEATURE_WEIGHTS: Record<string, FeatureWeightConfig> = {
   kids_menu:            { category: "kids_menu",             delta: 2, minEvidence: 1 },
   pram_space:           { category: "pram_space",            delta: 1, minEvidence: 1 },
   changing_table:       { category: "changing_table",        delta: 1, minEvidence: 1 },
-  staff_child_friendly: { category: "staff_child_friendly",  delta: 1, minEvidence: 1 },
-  noise_tolerant:       { category: "family_friendly",       delta: 1, minEvidence: 1 },
+  staff_child_friendly: { category: "staff_child_friendly",  negativeCategory: "staff_unfriendly", delta: 1, minEvidence: 1 },
+  noise_tolerant:       { category: "family_friendly",       negativeCategory: "noise_issue",      delta: 1, minEvidence: 1 },
 };
 
 function scoreExtraction(
@@ -455,7 +456,7 @@ function scoreExtraction(
       if (quotes >= weight.minEvidence) {
         score -= weight.delta;
         signalCount++;
-        negativeSignals.push({ category: weight.category, evidence: fe[feKey][0] ?? "" });
+        negativeSignals.push({ category: weight.negativeCategory ?? weight.category, evidence: fe[feKey][0] ?? "" });
         console.log(`[scoring] ACCEPTED ${key}: false — ${quotes} quote(s) (required ${weight.minEvidence}) → -${weight.delta}`);
       } else {
         console.log(`[scoring] REJECTED ${key}: false — only ${quotes} quote(s), required ${weight.minEvidence} → treated as unknown`);

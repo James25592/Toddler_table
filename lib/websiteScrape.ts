@@ -37,6 +37,11 @@ export interface WebsiteScrapeResult {
   };
 }
 
+export interface RawWebsiteScrape {
+  text: string;
+  source: 'website' | 'menu';
+}
+
 function extractTextFromHtml(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -68,6 +73,67 @@ function buildInferenceText(inferred: WebsiteScrapeResult['inferred'], source: s
   if (inferred.changing_table === true)
     lines.push(`[${source}] Baby changing facilities are available at this venue.`);
   return lines.join('\n');
+}
+
+export async function scrapeWebsiteRaw(websiteUrl: string): Promise<RawWebsiteScrape[]> {
+  if (!websiteUrl) return [];
+
+  const results: RawWebsiteScrape[] = [];
+
+  const mainController = new AbortController();
+  const mainTimeoutId = setTimeout(() => mainController.abort(), SCRAPE_TIMEOUT_MS);
+  try {
+    const res = await fetch(websiteUrl, {
+      signal: mainController.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; ToddlerFriendlyBot/1.0)',
+        Accept: 'text/html',
+      },
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const text = extractTextFromHtml(html);
+      if (text.trim()) results.push({ text, source: 'website' });
+    }
+  } catch {
+  } finally {
+    clearTimeout(mainTimeoutId);
+  }
+
+  const menuPaths = ['/menu', '/menus', '/food', '/kids-menu', '/children'];
+  let baseUrl: string;
+  try {
+    baseUrl = new URL(websiteUrl).origin;
+  } catch {
+    return results;
+  }
+
+  for (const path of menuPaths) {
+    const menuController = new AbortController();
+    const menuTimeoutId = setTimeout(() => menuController.abort(), 6_000);
+    try {
+      const res = await fetch(`${baseUrl}${path}`, {
+        signal: menuController.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; ToddlerFriendlyBot/1.0)',
+          Accept: 'text/html',
+        },
+      });
+      clearTimeout(menuTimeoutId);
+      if (res.ok) {
+        const html = await res.text();
+        const text = extractTextFromHtml(html);
+        if (text.trim()) {
+          results.push({ text, source: 'menu' });
+          break;
+        }
+      }
+    } catch {
+      clearTimeout(menuTimeoutId);
+    }
+  }
+
+  return results;
 }
 
 export async function scrapeWebsiteForFamilyInfo(websiteUrl: string): Promise<string[]> {

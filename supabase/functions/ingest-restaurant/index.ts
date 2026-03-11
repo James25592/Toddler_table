@@ -248,33 +248,83 @@ function buildWebsiteInferenceLines(text: string, label: string): string[] {
   return lines;
 }
 
-async function scrapeWebsiteForFamilyInfo(websiteUrl: string): Promise<string[]> {
-  if (!websiteUrl) return [];
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-  try {
-    const res = await fetch(websiteUrl, {
-      signal: controller.signal,
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; ToddlerFriendlyBot/1.0)", Accept: "text/html" },
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-    return buildWebsiteInferenceLines(extractTextFromHtml(html), "Website");
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(timeoutId);
-  }
+const WEBSITE_METADATA_SYSTEM_PROMPT = `You extract structured family/toddler-friendliness metadata from restaurant website content.
+
+Analyse the provided website text and return ONLY the following JSON object:
+
+{
+  "has_kids_menu": true | false | null,
+  "has_high_chairs": true | false | null,
+  "stroller_friendly": true | false | null,
+  "has_baby_changing": true | false | null,
+  "family_friendly_language": true | false | null,
+  "has_outdoor_seating": true | false | null,
+  "notes": "short plain-English note about any toddler-relevant information found, or null if nothing relevant"
 }
 
-async function scrapeMenuPageForFamilyInfo(websiteUrl: string): Promise<string[]> {
+Rules:
+- Return true if the text clearly mentions the feature, false if it explicitly says it is not available, null if there is no information either way.
+- has_kids_menu: true if the site mentions kids menu, children's menu, junior menu, little ones menu, mini menu, or similar.
+- has_high_chairs: true if the site mentions high chairs, highchairs, booster seats, baby seats, or child seats.
+- stroller_friendly: true if the site mentions pram-friendly, buggy-friendly, pushchair access, step-free access, wheelchair access, wide aisles, or similar.
+- has_baby_changing: true if the site mentions baby changing, changing facilities, parent and baby room, nappy changing, or similar.
+- family_friendly_language: true if the site uses wording like "family-friendly", "kid-friendly", "great for families", "children welcome", "play area", or similar.
+- has_outdoor_seating: true if the site mentions outdoor seating, garden, terrace, patio, outside tables, al fresco, beer garden, or similar.
+- notes: a short (max 30 words) plain-English note summarising the most relevant toddler-visit information found. Return null if nothing useful was found.
+- Return only valid JSON. No markdown, no prose outside the JSON object.`;
+
+interface WebsiteMetadata {
+  has_kids_menu: boolean | null;
+  has_high_chairs: boolean | null;
+  stroller_friendly: boolean | null;
+  has_baby_changing: boolean | null;
+  family_friendly_language: boolean | null;
+  has_outdoor_seating: boolean | null;
+  notes: string | null;
+}
+
+function websiteMetadataToInferenceLines(meta: WebsiteMetadata, label: string): string[] {
+  const lines: string[] = [];
+  if (meta.has_kids_menu === true) lines.push(`[${label}] This venue has a kids menu for children.`);
+  if (meta.has_high_chairs === true) lines.push(`[${label}] High chairs are available at this venue.`);
+  if (meta.stroller_friendly === true) lines.push(`[${label}] The venue is stroller and pram friendly.`);
+  if (meta.has_baby_changing === true) lines.push(`[${label}] Baby changing facilities are available at this venue.`);
+  if (meta.family_friendly_language === true) lines.push(`[${label}] The venue describes itself as family-friendly and welcoming to children.`);
+  if (meta.has_outdoor_seating === true) lines.push(`[${label}] Outdoor seating is available at this venue.`);
+  if (meta.has_kids_menu === false) lines.push(`[${label}] No kids menu is mentioned on the website.`);
+  if (meta.has_high_chairs === false) lines.push(`[${label}] No high chairs are mentioned as available.`);
+  if (meta.notes) lines.push(`[${label}] ${meta.notes}`);
+  return lines;
+}
+
+async function scrapeWebsiteRaw(websiteUrl: string): Promise<Array<{ text: string; source: "website" | "menu" }>> {
   if (!websiteUrl) return [];
+  const results: Array<{ text: string; source: "website" | "menu" }> = [];
+
+  const mainController = new AbortController();
+  const mainTimeoutId = setTimeout(() => mainController.abort(), 8000);
+  try {
+    const res = await fetch(websiteUrl, {
+      signal: mainController.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; ToddlerFriendlyBot/1.0)", Accept: "text/html" },
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const text = extractTextFromHtml(html);
+      if (text.trim()) results.push({ text, source: "website" });
+    }
+  } catch {
+  } finally {
+    clearTimeout(mainTimeoutId);
+  }
+
   let baseUrl: string;
   try {
     baseUrl = new URL(websiteUrl).origin;
   } catch {
-    return [];
+    return results;
   }
+
   const menuPaths = ["/menu", "/menus", "/food", "/kids-menu", "/children"];
   for (const path of menuPaths) {
     const controller = new AbortController();
@@ -284,16 +334,55 @@ async function scrapeMenuPageForFamilyInfo(websiteUrl: string): Promise<string[]
         signal: controller.signal,
         headers: { "User-Agent": "Mozilla/5.0 (compatible; ToddlerFriendlyBot/1.0)", Accept: "text/html" },
       });
-      if (!res.ok) { clearTimeout(timeoutId); continue; }
-      const html = await res.text();
       clearTimeout(timeoutId);
-      const lines = buildWebsiteInferenceLines(extractTextFromHtml(html), "Menu");
-      if (lines.length > 0) return lines;
+      if (res.ok) {
+        const html = await res.text();
+        const text = extractTextFromHtml(html);
+        if (text.trim()) {
+          results.push({ text, source: "menu" });
+          break;
+        }
+      }
     } catch {
       clearTimeout(timeoutId);
     }
   }
-  return [];
+
+  return results;
+}
+
+async function analyseWebsiteMetadataIngest(
+  pages: Array<{ text: string; source: "website" | "menu" }>,
+  apiKey: string,
+  venueName: string,
+): Promise<string[]> {
+  if (pages.length === 0) return [];
+  try {
+    const prompt = pages
+      .map((p) => `[${p.source === "menu" ? "Menu page" : "Website"}]:\n${p.text}`)
+      .join("\n\n---\n\n");
+    const raw = await callClaude(WEBSITE_METADATA_SYSTEM_PROMPT, prompt, apiKey, 512);
+    if (!raw.trim()) return [];
+    let parsed: unknown;
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(match ? match[0] : raw);
+    } catch {
+      console.warn(`[ingest] Website metadata JSON parse failed for "${venueName}"`);
+      const fallbackLines = pages.flatMap((p) => buildWebsiteInferenceLines(p.text, p.source === "menu" ? "Menu" : "Website"));
+      return fallbackLines;
+    }
+    const meta = parsed as WebsiteMetadata;
+    const label = pages.some((p) => p.source === "menu") ? "Menu" : "Website";
+    const lines = websiteMetadataToInferenceLines(meta, label);
+    if (lines.length > 0) {
+      console.log(`[ingest] AI website metadata found ${lines.length} inference(s) for "${venueName}"`);
+    }
+    return lines;
+  } catch (err) {
+    console.warn(`[ingest] Website metadata extraction failed for "${venueName}":`, err instanceof Error ? err.message : String(err));
+    return pages.flatMap((p) => buildWebsiteInferenceLines(p.text, p.source === "menu" ? "Menu" : "Website"));
+  }
 }
 
 function slugify(name: string): string {
@@ -645,13 +734,17 @@ async function runAnalysis(
   let websiteLines: string[] = [];
   if (websiteUrl) {
     try {
-      const [siteLines, menuLines] = await Promise.all([
-        scrapeWebsiteForFamilyInfo(websiteUrl),
-        scrapeMenuPageForFamilyInfo(websiteUrl),
-      ]);
-      websiteLines = [...siteLines, ...menuLines];
-      if (websiteLines.length > 0) {
-        console.log(`[ingest] Website scrape found ${websiteLines.length} inference(s) for "${venueName}"`);
+      const rawPages = await scrapeWebsiteRaw(websiteUrl);
+      if (rawPages.length > 0) {
+        websiteLines = await analyseWebsiteMetadataIngest(rawPages, anthropicKey, venueName);
+      }
+      if (websiteLines.length === 0) {
+        websiteLines = rawPages.flatMap((p) =>
+          buildWebsiteInferenceLines(p.text, p.source === "menu" ? "Menu" : "Website")
+        );
+        if (websiteLines.length > 0) {
+          console.log(`[ingest] Regex website scrape found ${websiteLines.length} inference(s) for "${venueName}"`);
+        }
       }
     } catch (err) {
       console.warn(`[ingest] Website scrape failed for "${venueName}":`, err instanceof Error ? err.message : String(err));

@@ -9,6 +9,10 @@ import {
   TODDLER_CARD_SUMMARY_SYSTEM_PROMPT,
   buildToddlerCardSummaryPrompt,
   ToddlerSummaryInput,
+  WEBSITE_METADATA_EXTRACTION_SYSTEM_PROMPT,
+  buildWebsiteMetadataPrompt,
+  websiteMetadataToInferenceLines,
+  WebsiteMetadata,
 } from './prompts';
 import { getCachedAnalysis, setCachedAnalysis } from './cache';
 import { scoreStructuredExtraction } from './scoring';
@@ -17,7 +21,7 @@ import { prepareReviewContext } from './reviewPreparation';
 import { fetchSubmissionsForRestaurant } from './submissions';
 import { fetchDetailedSubmissions } from './detailedSubmissions';
 import { inferVenueProfile, scoreVenueProfile, VenueProfileInput } from './venueProfile';
-import { scrapeWebsiteForFamilyInfo, scrapeMenuPageForFamilyInfo } from './websiteScrape';
+import { scrapeWebsiteForFamilyInfo, scrapeMenuPageForFamilyInfo, scrapeWebsiteRaw } from './websiteScrape';
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-3-5-haiku-20241022';
@@ -306,6 +310,42 @@ async function extractWithRetry(
   }
 }
 
+async function analyseWebsiteMetadata(
+  pages: Array<{ text: string; source: 'website' | 'menu' }>,
+  apiKey: string,
+  context: string,
+): Promise<string[]> {
+  if (pages.length === 0) return [];
+  try {
+    const userMessage = buildWebsiteMetadataPrompt(pages);
+    const raw = await callClaude(
+      WEBSITE_METADATA_EXTRACTION_SYSTEM_PROMPT,
+      userMessage,
+      apiKey,
+      512,
+    );
+    if (!raw.trim()) return [];
+    let parsed: unknown;
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(match ? match[0] : raw);
+    } catch {
+      console.warn(`[analyse] Website metadata JSON parse failed (${context})`);
+      return [];
+    }
+    const meta = parsed as WebsiteMetadata;
+    const label = pages.some((p) => p.source === 'menu') ? 'Menu' : 'Website';
+    const lines = websiteMetadataToInferenceLines(meta, label);
+    if (lines.length > 0) {
+      console.log(`[analyse] AI website metadata found ${lines.length} inference(s) for ${context}`);
+    }
+    return lines;
+  } catch (err) {
+    console.warn(`[analyse] Website metadata extraction failed (${context}): ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
 export async function extractStructuredEvidence(
   sentences: string[],
   apiKey: string,
@@ -358,13 +398,23 @@ export async function analyseRestaurantReviews(
     let websiteTexts: string[] = [];
     if (websiteUrl) {
       try {
-        const [siteTexts, menuTexts] = await Promise.all([
-          scrapeWebsiteForFamilyInfo(websiteUrl),
-          scrapeMenuPageForFamilyInfo(websiteUrl),
-        ]);
-        websiteTexts = [...siteTexts, ...menuTexts];
-        if (websiteTexts.length > 0) {
-          console.log(`[analyse] Website scrape found ${websiteTexts.length} inference(s) for "${restaurantName}"`);
+        const rawPages = await scrapeWebsiteRaw(websiteUrl);
+        if (rawPages.length > 0) {
+          websiteTexts = await analyseWebsiteMetadata(
+            rawPages,
+            apiKey,
+            restaurantName ?? place_id ?? 'unknown',
+          );
+        }
+        if (websiteTexts.length === 0) {
+          const [siteTexts, menuTexts] = await Promise.all([
+            scrapeWebsiteForFamilyInfo(websiteUrl),
+            scrapeMenuPageForFamilyInfo(websiteUrl),
+          ]);
+          websiteTexts = [...siteTexts, ...menuTexts];
+          if (websiteTexts.length > 0) {
+            console.log(`[analyse] Regex website scrape found ${websiteTexts.length} inference(s) for "${restaurantName}"`);
+          }
         }
       } catch (err) {
         console.warn(

@@ -281,6 +281,61 @@ export function buildToddlerCardSummaryPrompt(input: ToddlerSummaryInput): strin
   return lines.join('\n\n');
 }
 
+export const WEBSITE_METADATA_EXTRACTION_SYSTEM_PROMPT = `You extract structured family/toddler-friendliness metadata from restaurant website content.
+
+Analyse the provided website text and return ONLY the following JSON object:
+
+{
+  "has_kids_menu": true | false | null,
+  "has_high_chairs": true | false | null,
+  "stroller_friendly": true | false | null,
+  "has_baby_changing": true | false | null,
+  "family_friendly_language": true | false | null,
+  "has_outdoor_seating": true | false | null,
+  "notes": "short plain-English note about any toddler-relevant information found, or null if nothing relevant"
+}
+
+Rules:
+- Return true if the text clearly mentions the feature, false if it explicitly says it is not available, null if there is no information either way.
+- has_kids_menu: true if the site mentions kids menu, children's menu, junior menu, little ones menu, mini menu, or similar.
+- has_high_chairs: true if the site mentions high chairs, highchairs, booster seats, baby seats, or child seats.
+- stroller_friendly: true if the site mentions pram-friendly, buggy-friendly, pushchair access, step-free access, wheelchair access (step-free implies stroller access), wide aisles, or similar.
+- has_baby_changing: true if the site mentions baby changing, changing facilities, parent and baby room, nappy changing, or similar.
+- family_friendly_language: true if the site uses wording like "family-friendly", "kid-friendly", "great for families", "children welcome", "play area", or similar marketing language.
+- has_outdoor_seating: true if the site mentions outdoor seating, garden, terrace, patio, outside tables, al fresco, beer garden, or similar.
+- notes: a short (max 30 words) plain-English note summarising the most relevant toddler-visit information found. Return null if nothing useful was found.
+- Return only valid JSON. No markdown, no prose outside the JSON object.`;
+
+export function buildWebsiteMetadataPrompt(pages: Array<{ text: string; source: 'website' | 'menu' }>): string {
+  return pages
+    .map((p) => `[${p.source === 'menu' ? 'Menu page' : 'Website'}]:\n${p.text}`)
+    .join('\n\n---\n\n');
+}
+
+export interface WebsiteMetadata {
+  has_kids_menu: boolean | null;
+  has_high_chairs: boolean | null;
+  stroller_friendly: boolean | null;
+  has_baby_changing: boolean | null;
+  family_friendly_language: boolean | null;
+  has_outdoor_seating: boolean | null;
+  notes: string | null;
+}
+
+export function websiteMetadataToInferenceLines(meta: WebsiteMetadata, label: string): string[] {
+  const lines: string[] = [];
+  if (meta.has_kids_menu === true) lines.push(`[${label}] This venue has a kids menu for children.`);
+  if (meta.has_high_chairs === true) lines.push(`[${label}] High chairs are available at this venue.`);
+  if (meta.stroller_friendly === true) lines.push(`[${label}] The venue is stroller and pram friendly.`);
+  if (meta.has_baby_changing === true) lines.push(`[${label}] Baby changing facilities are available at this venue.`);
+  if (meta.family_friendly_language === true) lines.push(`[${label}] The venue describes itself as family-friendly and welcoming to children.`);
+  if (meta.has_outdoor_seating === true) lines.push(`[${label}] Outdoor seating is available at this venue.`);
+  if (meta.has_kids_menu === false) lines.push(`[${label}] No kids menu is mentioned on the website.`);
+  if (meta.has_high_chairs === false) lines.push(`[${label}] No high chairs are mentioned as available.`);
+  if (meta.notes) lines.push(`[${label}] ${meta.notes}`);
+  return lines;
+}
+
 export const EXAMPLE_REVIEWS = [
   "Came here with my 2-year-old last Sunday. The staff immediately brought a high chair without us asking, which was brilliant. There's a good kids' menu with pasta and sandwiches. The only downside is the tables are really close together and getting the buggy through was a nightmare — we had to fold it and leave it by the door.",
   "Lovely café but quite formal and quiet. Felt uncomfortable when my toddler started getting noisy. No baby changing facilities that I could find. The food was great but I wouldn't bring a young child here again.",

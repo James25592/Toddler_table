@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, X, RefreshCw, Database, CircleCheck as CheckCircle, CircleAlert as AlertCircle, Loader as Loader2, FlaskConical, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Settings, X, RefreshCw, Database, CircleCheck as CheckCircle, CircleAlert as AlertCircle, Loader as Loader2, FlaskConical, TrendingUp, TrendingDown, Minus, Zap } from 'lucide-react';
 
 interface FetchResult {
   inserted: number;
@@ -41,6 +41,10 @@ export default function AdminPanel() {
   const [reanalyseLoading, setReanalyseLoading] = useState(false);
   const [reanalyseResults, setReanalyseResults] = useState<ReanalyseResult[] | null>(null);
   const [reanalyseError, setReanalyseError] = useState<string | null>(null);
+  const [reanalyseAllLoading, setReanalyseAllLoading] = useState(false);
+  const [reanalyseAllProgress, setReanalyseAllProgress] = useState<{ processed: number; failed: number; total: number } | null>(null);
+  const [reanalyseAllError, setReanalyseAllError] = useState<string | null>(null);
+  const [reanalyseAllDone, setReanalyseAllDone] = useState(false);
 
   async function fetchDbCount() {
     setLoadingCount(true);
@@ -102,6 +106,57 @@ export default function AdminPanel() {
       setReanalyseError(err instanceof Error ? err.message : 'Network error');
     } finally {
       setReanalyseLoading(false);
+    }
+  }
+
+  async function handleReanalyseAll() {
+    setReanalyseAllLoading(true);
+    setReanalyseAllProgress(null);
+    setReanalyseAllError(null);
+    setReanalyseAllDone(false);
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+    let offset = 0;
+    let totalProcessed = 0;
+    let totalFailed = 0;
+
+    try {
+      while (true) {
+        const res = await fetch(`${supabaseUrl}/functions/v1/reanalyse-all-restaurants`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({ offset }),
+        });
+
+        if (!res.ok) {
+          const body = await res.text();
+          setReanalyseAllError(`Batch at offset ${offset} failed: ${body}`);
+          break;
+        }
+
+        const data = await res.json();
+        totalProcessed += data.processed ?? 0;
+        totalFailed += data.failed ?? 0;
+
+        setReanalyseAllProgress({ processed: totalProcessed, failed: totalFailed, total: totalProcessed + totalFailed });
+
+        if (data.next_offset === null || data.next_offset === undefined) {
+          setReanalyseAllDone(true);
+          break;
+        }
+
+        offset = data.next_offset;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    } catch (err) {
+      setReanalyseAllError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setReanalyseAllLoading(false);
     }
   }
 
@@ -330,6 +385,68 @@ export default function AdminPanel() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-stone-100 pt-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 bg-blue-50 rounded-lg flex items-center justify-center">
+                    <Zap className="w-3.5 h-3.5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-stone-900">Re-analyse all restaurants</p>
+                    <p className="text-xs text-stone-500">Re-run full analysis on every restaurant with website scraping</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleReanalyseAll}
+                  disabled={reanalyseAllLoading}
+                  className="w-full flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white font-medium text-sm rounded-xl px-4 py-2.5 transition-colors"
+                >
+                  {reanalyseAllLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Re-analysing all ({reanalyseAllProgress ? `${reanalyseAllProgress.total} done` : 'starting...'})
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4" />
+                      Re-analyse all restaurants
+                    </>
+                  )}
+                </button>
+
+                {reanalyseAllProgress && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-stone-600">
+                      <span>{reanalyseAllProgress.processed} succeeded</span>
+                      {reanalyseAllProgress.failed > 0 && <span className="text-red-500">{reanalyseAllProgress.failed} failed</span>}
+                      {reanalyseAllDone && <span className="text-emerald-600 font-medium">Complete</span>}
+                    </div>
+                    <div className="w-full bg-stone-100 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-300 ${reanalyseAllDone ? 'bg-emerald-500' : 'bg-blue-400'}`}
+                        style={{ width: `${Math.min(100, (reanalyseAllProgress.total / 184) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {reanalyseAllDone && (
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 flex items-start gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-emerald-700 font-medium">
+                      Re-analysis complete — {reanalyseAllProgress?.processed ?? 0} restaurants updated
+                    </p>
+                  </div>
+                )}
+
+                {reanalyseAllError && (
+                  <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-700">{reanalyseAllError}</p>
                   </div>
                 )}
               </div>

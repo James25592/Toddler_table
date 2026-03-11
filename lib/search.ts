@@ -18,14 +18,28 @@ async function runQuery(query: string, apiKey: string, cx: string, limit: number
     num: String(limit),
   });
 
-  const res = await fetch(`${CUSTOM_SEARCH_API_BASE}?${params}`);
-
-  if (!res.ok) {
-    throw new Error(`Custom Search API error: ${res.status} ${res.statusText}`);
+  let res: Response;
+  try {
+    res = await fetch(`${CUSTOM_SEARCH_API_BASE}?${params}`);
+  } catch (err) {
+    throw new Error(`Custom Search API network error: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const data = await res.json();
-  const items: { title?: string; snippet?: string; link?: string }[] = data.items ?? [];
+  if (!res.ok) {
+    let body = '';
+    try { body = await res.text(); } catch {}
+    throw new Error(`Custom Search API error: ${res.status} ${res.statusText} — ${body}`);
+  }
+
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch (err) {
+    throw new Error(`Custom Search API returned non-JSON response: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  const items: { title?: string; snippet?: string; link?: string }[] =
+    (data as { items?: { title?: string; snippet?: string; link?: string }[] }).items ?? [];
 
   return items.map((item) => ({
     title: item.title ?? '',
@@ -41,7 +55,8 @@ export async function fetchExternalRestaurantMentions(
   const cx = process.env.GOOGLE_CUSTOM_SEARCH_CX;
 
   if (!apiKey || !cx) {
-    throw new Error('GOOGLE_CUSTOM_SEARCH_API_KEY and GOOGLE_CUSTOM_SEARCH_CX must be set');
+    console.warn('[search] GOOGLE_CUSTOM_SEARCH_API_KEY or GOOGLE_CUSTOM_SEARCH_CX not set — skipping web search');
+    return { snippets: [] };
   }
 
   const queries = [
@@ -51,11 +66,18 @@ export async function fetchExternalRestaurantMentions(
 
   const resultsPerQuery = 5;
 
-  const [toddlerResults, highChairResults] = await Promise.all(
-    queries.map((q) => runQuery(q, apiKey, cx, resultsPerQuery)),
+  const queryResults = await Promise.all(
+    queries.map(async (q) => {
+      try {
+        return await runQuery(q, apiKey, cx, resultsPerQuery);
+      } catch (err) {
+        console.warn(`[search] Query failed for "${q}": ${err instanceof Error ? err.message : String(err)}`);
+        return [] as SearchSnippet[];
+      }
+    }),
   );
 
-  const combined = [...toddlerResults, ...highChairResults];
+  const combined = queryResults.flat();
   const seen = new Set<string>();
   const deduped: SearchSnippet[] = [];
 

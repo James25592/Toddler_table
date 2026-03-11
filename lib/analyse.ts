@@ -124,21 +124,30 @@ async function callClaude(
     if (err instanceof Error && err.name === 'AbortError') {
       throw new AnalysisError('Claude API request timed out', 504);
     }
-    throw err;
+    throw new AnalysisError(
+      `Claude API network error: ${err instanceof Error ? err.message : String(err)}`,
+      503,
+    );
   } finally {
     clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
-    const errorBody = await response.text();
+    let errorBody = '';
+    try { errorBody = await response.text(); } catch {}
     throw new AnalysisError(
       `Claude API error: ${response.status} — ${errorBody}`,
       response.status,
     );
   }
 
-  const data = await response.json();
-  return data.content?.[0]?.text ?? '';
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (err) {
+    throw new AnalysisError(`Claude API returned non-JSON response: ${err instanceof Error ? err.message : String(err)}`, 502);
+  }
+  return (data as { content?: { text?: string }[] }).content?.[0]?.text ?? '';
 }
 
 async function callClaudeWithJsonSchema(
@@ -180,13 +189,17 @@ async function callClaudeWithJsonSchema(
     if (err instanceof Error && err.name === 'AbortError') {
       throw new AnalysisError('Claude API request timed out', 504);
     }
-    throw err;
+    throw new AnalysisError(
+      `Claude API network error: ${err instanceof Error ? err.message : String(err)}`,
+      503,
+    );
   } finally {
     clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
-    const body = await response.text();
+    let body = '';
+    try { body = await response.text(); } catch {}
     if (response.status === 400 || response.status === 404) {
       return '';
     }
@@ -196,8 +209,13 @@ async function callClaudeWithJsonSchema(
     );
   }
 
-  const data = await response.json();
-  return data.content?.[0]?.text ?? '';
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (err) {
+    throw new AnalysisError(`Claude API returned non-JSON response: ${err instanceof Error ? err.message : String(err)}`, 502);
+  }
+  return (data as { content?: { text?: string }[] }).content?.[0]?.text ?? '';
 }
 
 function parseAndValidateExtraction(raw: string, context: string): ExtractionResult {
@@ -285,12 +303,12 @@ function truncateReviews(reviews: string[]): string[] {
   return result;
 }
 
-const EMPTY_RESULT: AnalysisResult & { _filtered_sentences: string[] } = {
+const FALLBACK_RESULT: AnalysisResult & { _filtered_sentences: string[] } = {
   positive_signals: [],
   negative_signals: [],
   toddler_score: 2.5,
   confidence: 0.1,
-  summary: 'No review information available.',
+  summary: 'Not enough information yet.',
   _filtered_sentences: [],
 };
 
@@ -300,110 +318,137 @@ export async function analyseRestaurantReviews(
   place_id?: string,
   restaurantName?: string,
 ): Promise<AnalysisResult & { _filtered_sentences: string[] }> {
-  if (place_id) {
-    const cached = getCachedAnalysis(place_id);
-    if (cached) return cached;
-  }
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    throw new AnalysisError('ANTHROPIC_API_KEY is not configured', 500);
-  }
-
-  let snippetTexts: string[] = [];
-  if (restaurantName) {
-    try {
-      const { snippets } = await fetchExternalRestaurantMentions(restaurantName);
-      snippetTexts = snippets.map((s) => s.snippet).filter(Boolean);
-    } catch (err) {
-      console.warn('[analyse] External search unavailable, proceeding without web mentions:', err instanceof Error ? err.message : err);
-      snippetTexts = [];
+  try {
+    if (place_id) {
+      const cached = getCachedAnalysis(place_id);
+      if (cached) return cached;
     }
-  }
 
-  const allReviews = [...reviews_to_analyse, ...snippetTexts];
-  if (allReviews.length === 0) {
-    return EMPTY_RESULT;
-  }
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      console.error(`[analyse] ANTHROPIC_API_KEY not configured${place_id ? ` (place_id: ${place_id})` : ''}`);
+      return FALLBACK_RESULT;
+    }
 
-  const truncated = truncateReviews(allReviews);
-  const extracted = await extractStructuredEvidence(truncated, apiKey);
+    let snippetTexts: string[] = [];
+    if (restaurantName) {
+      try {
+        const { snippets } = await fetchExternalRestaurantMentions(restaurantName);
+        snippetTexts = snippets.map((s) => s.snippet).filter(Boolean);
+      } catch (err) {
+        console.warn(
+          `[analyse] External search unavailable${place_id ? ` (place_id: ${place_id})` : ''}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        snippetTexts = [];
+      }
+    }
 
-  const hasAnySignal =
-    extracted.high_chairs !== 'unknown' ||
-    extracted.pram_space !== 'unknown' ||
-    extracted.changing_table !== 'unknown' ||
-    extracted.kids_menu !== 'unknown' ||
-    extracted.staff_child_friendly !== 'unknown' ||
-    extracted.noise_tolerant !== 'unknown' ||
-    extracted.negative_signals.length > 0;
+    const allReviews = [...reviews_to_analyse, ...snippetTexts];
+    if (allReviews.length === 0) {
+      return FALLBACK_RESULT;
+    }
 
-  if (!hasAnySignal) {
-    return {
-      positive_signals: [],
-      negative_signals: [],
-      toddler_score: 2.5,
-      confidence: 0.1,
-      summary: 'No toddler-relevant information was found in the provided reviews.',
-      _filtered_sentences: [],
+    let extracted: StructuredExtractionResult;
+    try {
+      const truncated = truncateReviews(allReviews);
+      extracted = await extractStructuredEvidence(truncated, apiKey);
+    } catch (err) {
+      console.error(
+        `[analyse] Extraction failed${place_id ? ` (place_id: ${place_id})` : ''}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return FALLBACK_RESULT;
+    }
+
+    const hasAnySignal =
+      extracted.high_chairs !== 'unknown' ||
+      extracted.pram_space !== 'unknown' ||
+      extracted.changing_table !== 'unknown' ||
+      extracted.kids_menu !== 'unknown' ||
+      extracted.staff_child_friendly !== 'unknown' ||
+      extracted.noise_tolerant !== 'unknown' ||
+      extracted.negative_signals.length > 0;
+
+    if (!hasAnySignal) {
+      return {
+        ...FALLBACK_RESULT,
+        summary: 'No toddler-relevant information was found in the provided reviews.',
+      };
+    }
+
+    const scored = scoreStructuredExtraction(extracted);
+
+    const confidence =
+      review_source === 'fallback'
+        ? Math.min(1, Math.max(0, scored.confidence * 0.7))
+        : scored.confidence;
+
+    const evidenceSentences = [
+      ...extracted.evidence_quotes,
+      ...extracted.negative_signals,
+    ];
+
+    let summary = 'No summary available.';
+    try {
+      const raw = await callClaude(
+        TODDLER_SUMMARY_SYSTEM_PROMPT,
+        buildSummaryPrompt(evidenceSentences),
+        apiKey,
+        128,
+      );
+      if (raw.trim()) summary = raw.trim();
+    } catch (err) {
+      console.warn(
+        `[analyse] Summary generation failed${place_id ? ` (place_id: ${place_id})` : ''}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const result = {
+      positive_signals: scored.positive_signals,
+      negative_signals: scored.negative_signals,
+      toddler_score: scored.toddler_score,
+      confidence,
+      summary,
+      _filtered_sentences: evidenceSentences,
     };
+
+    if (place_id) {
+      setCachedAnalysis(place_id, result);
+    }
+
+    return result;
+  } catch (err) {
+    console.error(
+      `[analyse] Unexpected error in analyseRestaurantReviews${place_id ? ` (place_id: ${place_id})` : ''}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return FALLBACK_RESULT;
   }
-
-  const scored = scoreStructuredExtraction(extracted);
-
-  const confidence =
-    review_source === 'fallback'
-      ? Math.min(1, Math.max(0, scored.confidence * 0.7))
-      : scored.confidence;
-
-  const evidenceSentences = [
-    ...extracted.evidence_quotes,
-    ...extracted.negative_signals,
-  ];
-
-  const summary = await callClaude(
-    TODDLER_SUMMARY_SYSTEM_PROMPT,
-    buildSummaryPrompt(evidenceSentences),
-    apiKey,
-    128,
-  );
-
-  const result = {
-    positive_signals: scored.positive_signals,
-    negative_signals: scored.negative_signals,
-    toddler_score: scored.toddler_score,
-    confidence,
-    summary: summary.trim() || 'No summary available.',
-    _filtered_sentences: evidenceSentences,
-  };
-
-  if (place_id) {
-    setCachedAnalysis(place_id, result);
-  }
-
-  return result;
 }
 
 export async function generateToddlerCardSummary(
   input: ToddlerSummaryInput,
 ): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new AnalysisError('ANTHROPIC_API_KEY is not configured', 500);
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      console.error('[analyse] generateToddlerCardSummary: ANTHROPIC_API_KEY not configured');
+      return 'Not enough information yet.';
+    }
+
+    const prompt = buildToddlerCardSummaryPrompt(input);
+    if (!prompt.trim()) {
+      return '';
+    }
+
+    const raw = await callClaude(
+      TODDLER_CARD_SUMMARY_SYSTEM_PROMPT,
+      prompt,
+      apiKey,
+      128,
+    );
+
+    return raw.trim();
+  } catch (err) {
+    console.error(`[analyse] generateToddlerCardSummary failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 'Not enough information yet.';
   }
-
-  const prompt = buildToddlerCardSummaryPrompt(input);
-  if (!prompt.trim()) {
-    return '';
-  }
-
-  const raw = await callClaude(
-    TODDLER_CARD_SUMMARY_SYSTEM_PROMPT,
-    prompt,
-    apiKey,
-    128,
-  );
-
-  return raw.trim();
 }

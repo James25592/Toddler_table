@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { analyseRestaurantReviews, AnalysisError } from '@/lib/analyse';
+import { analyseRestaurantReviews } from '@/lib/analyse';
 import { AnalyseRequest } from '@/lib/types';
 import { EXAMPLE_REVIEWS } from '@/lib/prompts';
+
+const FALLBACK_RESPONSE = {
+  positive_signals: [],
+  negative_signals: [],
+  toddler_score: 2.5,
+  confidence: 0.1,
+  summary: 'Not enough information yet.',
+  _filtered_sentences: [],
+};
 
 type ReviewSource = 'filtered' | 'fallback';
 
@@ -39,17 +48,8 @@ export async function POST(req: NextRequest) {
     const result = await analyseRestaurantReviews(reviews, review_source, place_id, restaurantName);
     return NextResponse.json(result);
   } catch (err) {
-    if (err instanceof AnalysisError) {
-      return NextResponse.json(
-        { error: err.message },
-        { status: err.statusCode ?? 500 },
-      );
-    }
-    console.error('[analyse-restaurant] Unexpected error:', err);
-    return NextResponse.json(
-      { error: 'An unexpected error occurred' },
-      { status: 500 },
-    );
+    console.error(`[analyse-restaurant] Unexpected error${place_id ? ` (place_id: ${place_id})` : ''}:`, err);
+    return NextResponse.json(FALLBACK_RESPONSE);
   }
 }
 
@@ -84,15 +84,10 @@ export async function GET(req: NextRequest) {
       ...result,
     });
   } catch (err) {
-    if (err instanceof AnalysisError) {
-      return NextResponse.json(
-        { error: err.message },
-        { status: err.statusCode ?? 500 },
-      );
-    }
-    return NextResponse.json(
-      { error: 'An unexpected error occurred' },
-      { status: 500 },
-    );
+    console.error('[analyse-restaurant] GET example failed:', err);
+    return NextResponse.json({
+      _meta: { note: 'Analysis failed — returning fallback.' },
+      ...FALLBACK_RESPONSE,
+    });
   }
 }

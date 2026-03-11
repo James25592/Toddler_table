@@ -106,28 +106,33 @@ export default async function RestaurantPage({ params }: PageProps) {
   if (!restaurant) notFound();
 
   const [submissions, confirmations, detailedSubmissions] = await Promise.all([
-    fetchSubmissionsForRestaurant(restaurant.id),
-    fetchConfirmationsForRestaurant(restaurant.id),
-    fetchDetailedSubmissions(restaurant.id),
+    fetchSubmissionsForRestaurant(restaurant.id).catch(() => []),
+    fetchConfirmationsForRestaurant(restaurant.id).catch(() => []),
+    fetchDetailedSubmissions(restaurant.id).catch(() => []),
   ]);
   const aggregation = aggregateConfirmations(confirmations);
   const detailedAggregation = aggregateDetailedSubmissions(detailedSubmissions);
+
+  const positiveSignals = restaurant.positiveSignals ?? [];
+  const negativeSignals = restaurant.negativeSignals ?? [];
+
   const snapshot = buildToddlerSnapshot(
-    restaurant.positiveSignals,
-    restaurant.negativeSignals,
+    positiveSignals,
+    negativeSignals,
     submissions,
   );
   const { stress_level } = computeStressLevel(
-    restaurant.positiveSignals,
-    restaurant.negativeSignals,
+    positiveSignals,
+    negativeSignals,
     snapshot,
   );
 
-  const scoreLabel = getScoreLabel(restaurant.toddlerScore);
-  const confidenceStyle = getConfidenceStyle(restaurant.confidence);
-  const confidenceLabel = getConfidenceLabel(restaurant.confidence);
-  const isLowConfidence = restaurant.confidence < 0.5;
-  const totalSignals = restaurant.positiveSignals.length + restaurant.negativeSignals.length;
+  const scoreLabel = getScoreLabel(restaurant.toddlerScore ?? 2.5);
+  const safeConfidence = restaurant.confidence ?? 0.1;
+  const confidenceStyle = getConfidenceStyle(safeConfidence);
+  const confidenceLabel = getConfidenceLabel(safeConfidence);
+  const isLowConfidence = safeConfidence < 0.5;
+  const totalSignals = positiveSignals.length + negativeSignals.length;
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -195,13 +200,13 @@ export default async function RestaurantPage({ params }: PageProps) {
                     </span>
                   </div>
                   <span className={`text-xs font-medium tabular-nums ${confidenceStyle.text}`}>
-                    {Math.round(restaurant.confidence * 100)}%
+                    {Math.round(safeConfidence * 100)}%
                   </span>
                 </div>
                 <div className="h-1.5 rounded-full bg-stone-200 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all ${confidenceStyle.bar}`}
-                    style={{ width: `${restaurant.confidence * 100}%` }}
+                    style={{ width: `${safeConfidence * 100}%` }}
                   />
                 </div>
                 {isLowConfidence && (
@@ -242,13 +247,13 @@ export default async function RestaurantPage({ params }: PageProps) {
                 </svg>
               </div>
               <h2 className="text-sm font-semibold text-stone-800">Positive signals</h2>
-              <span className="ml-auto text-xs text-stone-400">{restaurant.positiveSignals.length}</span>
+              <span className="ml-auto text-xs text-stone-400">{positiveSignals.length}</span>
             </div>
-            {restaurant.positiveSignals.length === 0 ? (
+            {positiveSignals.length === 0 ? (
               <p className="text-sm text-stone-400 italic">No positive signals found in reviews.</p>
             ) : (
               <div className="flex flex-col gap-3">
-                {restaurant.positiveSignals.map((signal, i) => (
+                {positiveSignals.map((signal, i) => (
                   <SignalCard key={i} signal={signal} variant="positive" />
                 ))}
               </div>
@@ -263,13 +268,13 @@ export default async function RestaurantPage({ params }: PageProps) {
                 </svg>
               </div>
               <h2 className="text-sm font-semibold text-stone-800">Things to know</h2>
-              <span className="ml-auto text-xs text-stone-400">{restaurant.negativeSignals.length}</span>
+              <span className="ml-auto text-xs text-stone-400">{negativeSignals.length}</span>
             </div>
-            {restaurant.negativeSignals.length === 0 ? (
+            {negativeSignals.length === 0 ? (
               <p className="text-sm text-stone-400 italic">No concerns found in reviews.</p>
             ) : (
               <div className="flex flex-col gap-3">
-                {restaurant.negativeSignals.map((signal, i) => (
+                {negativeSignals.map((signal, i) => (
                   <SignalCard key={i} signal={signal} variant="negative" />
                 ))}
               </div>
@@ -281,11 +286,11 @@ export default async function RestaurantPage({ params }: PageProps) {
           <div className="flex items-center gap-2 mb-5">
             <h2 className="text-sm font-semibold text-stone-800">Evidence from reviews</h2>
             <span className="text-xs text-stone-400 bg-stone-100 px-2 py-0.5 rounded-full">
-              {restaurant.reviewEvidence.length} extracts
+              {(restaurant.reviewEvidence ?? []).length} extracts
             </span>
           </div>
           <div className="flex flex-col gap-4">
-            {restaurant.reviewEvidence.map((review, i) => {
+            {(restaurant.reviewEvidence ?? []).map((review, i) => {
               const config = sentimentConfig[review.sentiment];
               return (
                 <div key={i} className={`rounded-xl border p-4 ${config.bg} ${config.border}`}>

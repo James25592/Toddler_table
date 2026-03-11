@@ -404,8 +404,8 @@ interface FeatureWeightConfig {
 }
 
 const FEATURE_WEIGHTS: Record<string, FeatureWeightConfig> = {
-  high_chairs:          { category: "high_chair",            delta: 2, minEvidence: 2 },
-  kids_menu:            { category: "kids_menu",             delta: 2, minEvidence: 2 },
+  high_chairs:          { category: "high_chair",            delta: 2, minEvidence: 1 },
+  kids_menu:            { category: "kids_menu",             delta: 2, minEvidence: 1 },
   pram_space:           { category: "pram_space",            delta: 1, minEvidence: 1 },
   changing_table:       { category: "changing_table",        delta: 1, minEvidence: 1 },
   staff_child_friendly: { category: "staff_child_friendly",  delta: 1, minEvidence: 1 },

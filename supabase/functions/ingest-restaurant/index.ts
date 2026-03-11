@@ -385,6 +385,91 @@ async function analyseWebsiteMetadataIngest(
   }
 }
 
+const SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT = `You extract structured family/toddler-friendliness signals from restaurant reviews, social media posts, and text snippets written by customers.
+
+Analyse the provided text and return ONLY the following JSON object:
+
+{
+  "mentions_high_chairs": true | false | null,
+  "mentions_stroller_space": true | false | null,
+  "mentions_kids_menu": true | false | null,
+  "mentions_play_area_or_toys": true | false | null,
+  "mentions_outdoor_seating": true | false | null,
+  "family_sentiment": "positive" | "negative" | "mixed" | "neutral" | null,
+  "notes": "short plain-English note (max 40 words) about the most useful toddler-visit information found, or null if nothing relevant"
+}
+
+Definitions:
+- mentions_high_chairs: true if present (brought a high chair, high chairs available, booster seat); false if explicitly absent (no high chairs); null if not mentioned
+- mentions_stroller_space: true if positive (room for pram/buggy/stroller, step-free); false if negative (couldn't fit, had to fold buggy); null if not mentioned
+- mentions_kids_menu: true if a kids/children's/junior/mini menu is confirmed present; false if explicitly absent; null if not mentioned
+- mentions_play_area_or_toys: true if play area, play corner, toys, activity packs, colouring sheets, or kids entertainment mentioned; false if explicitly absent; null if not mentioned
+- mentions_outdoor_seating: true if outdoor seating, garden, terrace, patio, or outside area mentioned; null if not mentioned
+- family_sentiment: "positive" if venue found welcoming/accommodating for families; "negative" if unwelcoming/unsuitable; "mixed" if both; "neutral" if neutral mention; null if families not meaningfully referenced
+- notes: the single most useful detail for a parent deciding whether to visit with a toddler. Return null if nothing useful.
+
+Rules:
+- Use inferential reasoning: "we didn't have to ask for a high chair" → mentions_high_chairs: true; "had to fold the pram to get through the door" → mentions_stroller_space: false
+- Return true/false/null — NOT "unknown"
+- Return only valid JSON. No markdown, no prose outside the JSON.`;
+
+interface SocialReviewMetadataIngest {
+  mentions_high_chairs: boolean | null;
+  mentions_stroller_space: boolean | null;
+  mentions_kids_menu: boolean | null;
+  mentions_play_area_or_toys: boolean | null;
+  mentions_outdoor_seating: boolean | null;
+  family_sentiment: "positive" | "negative" | "mixed" | "neutral" | null;
+  notes: string | null;
+}
+
+function socialReviewMetadataToInferenceLines(meta: SocialReviewMetadataIngest): string[] {
+  const lines: string[] = [];
+  if (meta.mentions_high_chairs === true) lines.push("[Review] High chairs are available at this venue.");
+  if (meta.mentions_high_chairs === false) lines.push("[Review] No high chairs available at this venue.");
+  if (meta.mentions_stroller_space === true) lines.push("[Review] There is good stroller and pram space at this venue.");
+  if (meta.mentions_stroller_space === false) lines.push("[Review] Stroller or pram access is difficult or not possible at this venue.");
+  if (meta.mentions_kids_menu === true) lines.push("[Review] A kids menu is available at this venue.");
+  if (meta.mentions_kids_menu === false) lines.push("[Review] No kids menu is available at this venue.");
+  if (meta.mentions_play_area_or_toys === true) lines.push("[Review] This venue has a play area or toys for children.");
+  if (meta.mentions_outdoor_seating === true) lines.push("[Review] Outdoor seating is available at this venue.");
+  if (meta.family_sentiment === "positive") lines.push("[Review] Reviewers describe this venue positively for families and toddlers.");
+  if (meta.family_sentiment === "negative") lines.push("[Review] Reviewers describe this venue as unwelcoming or unsuitable for families with toddlers.");
+  if (meta.family_sentiment === "mixed") lines.push("[Review] Reviewers have mixed experiences bringing toddlers to this venue.");
+  if (meta.notes) lines.push(`[Review] ${meta.notes}`);
+  return lines;
+}
+
+async function analyseSocialSnippetsIngest(
+  snippets: string[],
+  apiKey: string,
+  venueName: string,
+): Promise<string[]> {
+  if (snippets.length === 0) return [];
+  try {
+    const prompt = snippets.map((s, i) => `[Snippet ${i + 1}]:\n${s}`).join("\n\n---\n\n");
+    const raw = await callClaude(SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT, prompt, apiKey, 512);
+    if (!raw.trim()) return [];
+    let parsed: unknown;
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(match ? match[0] : raw);
+    } catch {
+      console.warn(`[ingest] Social review metadata JSON parse failed for "${venueName}"`);
+      return [];
+    }
+    const meta = parsed as SocialReviewMetadataIngest;
+    const lines = socialReviewMetadataToInferenceLines(meta);
+    if (lines.length > 0) {
+      console.log(`[ingest] Social review metadata found ${lines.length} inference(s) for "${venueName}"`);
+    }
+    return lines;
+  } catch (err) {
+    console.warn(`[ingest] Social snippet analysis failed for "${venueName}":`, err instanceof Error ? err.message : String(err));
+    return [];
+  }
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -751,10 +836,17 @@ async function runAnalysis(
     }
   }
 
+  const socialInferenceLines = await analyseSocialSnippetsIngest(
+    reviews.filter(Boolean),
+    anthropicKey,
+    venueName,
+  );
+
   const truncated = truncateReviews(reviews);
   const reviewBlock = [
     ...truncated.map((r, i) => `Review ${i + 1}:\n${r}`),
     ...websiteLines,
+    ...socialInferenceLines,
   ].join("\n\n");
 
   let extracted: ExtractionResult;

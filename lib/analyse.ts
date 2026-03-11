@@ -13,6 +13,10 @@ import {
   buildWebsiteMetadataPrompt,
   websiteMetadataToInferenceLines,
   WebsiteMetadata,
+  SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT,
+  buildSocialReviewMetadataPrompt,
+  socialReviewMetadataToInferenceLines,
+  SocialReviewMetadata,
 } from './prompts';
 import { getCachedAnalysis, setCachedAnalysis } from './cache';
 import { scoreStructuredExtraction } from './scoring';
@@ -346,6 +350,49 @@ async function analyseWebsiteMetadata(
   }
 }
 
+export async function extractSocialReviewMetadata(
+  snippets: string[],
+  apiKey: string,
+): Promise<{ metadata: SocialReviewMetadata; inferenceLines: string[] }> {
+  const userMessage = buildSocialReviewMetadataPrompt(snippets);
+  const raw = await callClaude(
+    SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT,
+    userMessage,
+    apiKey,
+    512,
+  );
+
+  let parsed: unknown;
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(match ? match[0] : raw);
+  } catch {
+    throw new AnalysisError('Failed to parse social review metadata JSON');
+  }
+
+  const meta = parsed as SocialReviewMetadata;
+  const inferenceLines = socialReviewMetadataToInferenceLines(meta);
+  return { metadata: meta, inferenceLines };
+}
+
+async function analyseSocialSnippets(
+  snippets: string[],
+  apiKey: string,
+  context: string,
+): Promise<string[]> {
+  if (snippets.length === 0) return [];
+  try {
+    const { inferenceLines } = await extractSocialReviewMetadata(snippets, apiKey);
+    if (inferenceLines.length > 0) {
+      console.log(`[analyse] Social review metadata found ${inferenceLines.length} inference(s) for ${context}`);
+    }
+    return inferenceLines;
+  } catch (err) {
+    console.warn(`[analyse] Social snippet analysis failed (${context}): ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
 export async function extractStructuredEvidence(
   sentences: string[],
   apiKey: string,
@@ -430,9 +477,20 @@ export async function analyseRestaurantReviews(
         ])
       : [[], []];
 
+    const allReviewSnippets = [
+      ...reviews_to_analyse,
+      ...snippetTexts,
+    ].filter(Boolean);
+
+    const socialInferenceLines = await analyseSocialSnippets(
+      allReviewSnippets,
+      apiKey,
+      restaurantName ?? place_id ?? 'unknown',
+    );
+
     const preparedSentences = prepareReviewContext({
       googleReviews: reviews_to_analyse,
-      searchSnippets: [...snippetTexts, ...websiteTexts],
+      searchSnippets: [...snippetTexts, ...websiteTexts, ...socialInferenceLines],
       parentSubmissions,
       detailedSubmissions,
     });

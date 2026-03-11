@@ -281,6 +281,81 @@ export function buildToddlerCardSummaryPrompt(input: ToddlerSummaryInput): strin
   return lines.join('\n\n');
 }
 
+export const SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT = `You extract structured family/toddler-friendliness signals from restaurant reviews, social media posts, and text snippets written by customers.
+
+Analyse the provided text and return ONLY the following JSON object:
+
+{
+  "mentions_high_chairs": true | false | null,
+  "mentions_stroller_space": true | false | null,
+  "mentions_kids_menu": true | false | null,
+  "mentions_play_area_or_toys": true | false | null,
+  "mentions_outdoor_seating": true | false | null,
+  "family_sentiment": "positive" | "negative" | "mixed" | "neutral" | null,
+  "notes": "short plain-English note (max 40 words) about the most useful toddler-visit information found, or null if nothing relevant"
+}
+
+Definitions:
+- mentions_high_chairs: true if the text mentions high chairs, highchairs, booster seats, baby seats, or child seats — present OR absent.
+  - true if present: "they brought a high chair", "high chairs available", "booster seat for the little one"
+  - false if explicitly absent: "no high chairs", "they don't have high chairs"
+  - null if not mentioned at all
+- mentions_stroller_space: true if positive (room for pram/pushchair/buggy/stroller, step-free, wide doors); false if negative (couldn't fit, had to fold buggy, no pram space); null if not mentioned
+- mentions_kids_menu: true if a kids/children's/junior/mini menu is confirmed present; false if explicitly absent; null if not mentioned
+- mentions_play_area_or_toys: true if the text mentions a play area, play corner, toys, activity packs, colouring sheets, chalk board, kids' entertainment, or similar; false if explicitly absent; null if not mentioned
+- mentions_outdoor_seating: true if outdoor seating, garden, terrace, patio, outside area, or beer garden is mentioned; null if not mentioned
+- family_sentiment: the overall tone of the text regarding families/toddlers/children
+  - "positive": the author found the venue welcoming, accommodating, enjoyable for their family
+  - "negative": the author found the venue unwelcoming, uncomfortable, or unsuitable for children
+  - "mixed": both positive and negative aspects for families are mentioned
+  - "neutral": families/children are mentioned but with no clear positive or negative tone
+  - null: families/children are not meaningfully referenced
+- notes: highlight the single most useful detail for a parent deciding whether to visit with a toddler. Include specific details (e.g. "staff proactively brought a high chair; outdoor terrace good for restless toddlers"). Return null if nothing useful.
+
+Rules:
+- Use inferential reasoning. Indirect evidence counts:
+  - "we didn't have to ask for a high chair" → mentions_high_chairs: true
+  - "our daughter loved the play corner" → mentions_play_area_or_toys: true
+  - "sat outside in the sun with the kids" → mentions_outdoor_seating: true, family_sentiment leans positive
+  - "had to fold the pram to get through the door" → mentions_stroller_space: false
+  - "staff were lovely with our toddler" → family_sentiment: positive
+  - "felt like we weren't welcome with kids" → family_sentiment: negative
+- Return true/false/null — NOT "unknown"
+- Return only valid JSON. No markdown, no prose outside the JSON.`;
+
+export function buildSocialReviewMetadataPrompt(snippets: string[]): string {
+  return snippets
+    .map((s, i) => `[Snippet ${i + 1}]:\n${s}`)
+    .join('\n\n---\n\n');
+}
+
+export interface SocialReviewMetadata {
+  mentions_high_chairs: boolean | null;
+  mentions_stroller_space: boolean | null;
+  mentions_kids_menu: boolean | null;
+  mentions_play_area_or_toys: boolean | null;
+  mentions_outdoor_seating: boolean | null;
+  family_sentiment: 'positive' | 'negative' | 'mixed' | 'neutral' | null;
+  notes: string | null;
+}
+
+export function socialReviewMetadataToInferenceLines(meta: SocialReviewMetadata): string[] {
+  const lines: string[] = [];
+  if (meta.mentions_high_chairs === true) lines.push('[Review] High chairs are available at this venue.');
+  if (meta.mentions_high_chairs === false) lines.push('[Review] No high chairs available at this venue.');
+  if (meta.mentions_stroller_space === true) lines.push('[Review] There is good stroller and pram space at this venue.');
+  if (meta.mentions_stroller_space === false) lines.push('[Review] Stroller or pram access is difficult or not possible at this venue.');
+  if (meta.mentions_kids_menu === true) lines.push('[Review] A kids menu is available at this venue.');
+  if (meta.mentions_kids_menu === false) lines.push('[Review] No kids menu is available at this venue.');
+  if (meta.mentions_play_area_or_toys === true) lines.push('[Review] This venue has a play area or toys for children.');
+  if (meta.mentions_outdoor_seating === true) lines.push('[Review] Outdoor seating is available at this venue.');
+  if (meta.family_sentiment === 'positive') lines.push('[Review] Reviewers describe this venue positively for families and toddlers.');
+  if (meta.family_sentiment === 'negative') lines.push('[Review] Reviewers describe this venue as unwelcoming or unsuitable for families with toddlers.');
+  if (meta.family_sentiment === 'mixed') lines.push('[Review] Reviewers have mixed experiences bringing toddlers to this venue.');
+  if (meta.notes) lines.push(`[Review] ${meta.notes}`);
+  return lines;
+}
+
 export const WEBSITE_METADATA_EXTRACTION_SYSTEM_PROMPT = `You extract structured family/toddler-friendliness metadata from restaurant website content.
 
 Analyse the provided website text and return ONLY the following JSON object:

@@ -17,6 +17,7 @@ import { prepareReviewContext } from './reviewPreparation';
 import { fetchSubmissionsForRestaurant } from './submissions';
 import { fetchDetailedSubmissions } from './detailedSubmissions';
 import { inferVenueProfile, scoreVenueProfile, VenueProfileInput } from './venueProfile';
+import { scrapeWebsiteForFamilyInfo, scrapeMenuPageForFamilyInfo } from './websiteScrape';
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-3-5-haiku-20241022';
@@ -328,6 +329,7 @@ export async function analyseRestaurantReviews(
   place_id?: string,
   restaurantName?: string,
   venueMeta?: VenueProfileInput,
+  websiteUrl?: string,
 ): Promise<AnalysisResult & { _filtered_sentences: string[] }> {
   try {
     if (place_id) {
@@ -353,6 +355,24 @@ export async function analyseRestaurantReviews(
       }
     }
 
+    let websiteTexts: string[] = [];
+    if (websiteUrl) {
+      try {
+        const [siteTexts, menuTexts] = await Promise.all([
+          scrapeWebsiteForFamilyInfo(websiteUrl),
+          scrapeMenuPageForFamilyInfo(websiteUrl),
+        ]);
+        websiteTexts = [...siteTexts, ...menuTexts];
+        if (websiteTexts.length > 0) {
+          console.log(`[analyse] Website scrape found ${websiteTexts.length} inference(s) for "${restaurantName}"`);
+        }
+      } catch (err) {
+        console.warn(
+          `[analyse] Website scrape failed${place_id ? ` (place_id: ${place_id})` : ''}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const [parentSubmissions, detailedSubmissions] = place_id
       ? await Promise.all([
           fetchSubmissionsForRestaurant(place_id).catch(() => []),
@@ -362,7 +382,7 @@ export async function analyseRestaurantReviews(
 
     const preparedSentences = prepareReviewContext({
       googleReviews: reviews_to_analyse,
-      searchSnippets: snippetTexts,
+      searchSnippets: [...snippetTexts, ...websiteTexts],
       parentSubmissions,
       detailedSubmissions,
     });

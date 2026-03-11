@@ -32,6 +32,7 @@ interface IngestionRequest {
   primary_type?: string;
   secondary_types?: string[];
   price_level?: number | null;
+  website?: string | null;
 }
 
 interface DbRestaurant {
@@ -43,6 +44,7 @@ interface DbRestaurant {
   google_rating: number;
   google_review_count: number;
   image_url: string;
+  website: string | null;
   cached_reviews: string[];
   last_review_fetch: string | null;
   last_analysed_at: string | null;
@@ -192,6 +194,106 @@ function inferAndScoreVenueProfile(
 
   const adjustment = Math.max(-VENUE_PROFILE_SCORE_CAP, Math.min(VENUE_PROFILE_SCORE_CAP, raw));
   return { adjustment, signals };
+}
+
+const KIDS_MENU_PATTERNS = [
+  /kids?\s*(menu|meal|option|section|eat)/i,
+  /children'?s?\s*(menu|meal|option)/i,
+  /junior\s+menu/i,
+  /little\s+ones?\s*(menu|meal|section)/i,
+  /mini\s+menu/i,
+  /for\s+the\s+little\s+ones?/i,
+  /family\s+menu/i,
+];
+
+const HIGH_CHAIR_PATTERNS = [
+  /high\s*chair/i,
+  /highchair/i,
+  /booster\s+seat/i,
+  /child\s+seat/i,
+  /baby\s+seat/i,
+];
+
+const CHANGING_TABLE_PATTERNS = [
+  /baby\s+chang/i,
+  /changing\s+(table|facilit|room)/i,
+  /parent\s+(and|&)\s+baby/i,
+  /baby.friendly\s+toilet/i,
+  /nappy\s+chang/i,
+];
+
+function extractTextFromHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, 3000);
+}
+
+function buildWebsiteInferenceLines(text: string, label: string): string[] {
+  const lines: string[] = [];
+  if (KIDS_MENU_PATTERNS.some((p) => p.test(text)))
+    lines.push(`[${label}] This venue has a kids menu for children.`);
+  if (HIGH_CHAIR_PATTERNS.some((p) => p.test(text)))
+    lines.push(`[${label}] High chairs are available at this venue.`);
+  if (CHANGING_TABLE_PATTERNS.some((p) => p.test(text)))
+    lines.push(`[${label}] Baby changing facilities are available at this venue.`);
+  return lines;
+}
+
+async function scrapeWebsiteForFamilyInfo(websiteUrl: string): Promise<string[]> {
+  if (!websiteUrl) return [];
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(websiteUrl, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; ToddlerFriendlyBot/1.0)", Accept: "text/html" },
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    return buildWebsiteInferenceLines(extractTextFromHtml(html), "Website");
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function scrapeMenuPageForFamilyInfo(websiteUrl: string): Promise<string[]> {
+  if (!websiteUrl) return [];
+  let baseUrl: string;
+  try {
+    baseUrl = new URL(websiteUrl).origin;
+  } catch {
+    return [];
+  }
+  const menuPaths = ["/menu", "/menus", "/food", "/kids-menu", "/children"];
+  for (const path of menuPaths) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    try {
+      const res = await fetch(`${baseUrl}${path}`, {
+        signal: controller.signal,
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; ToddlerFriendlyBot/1.0)", Accept: "text/html" },
+      });
+      if (!res.ok) { clearTimeout(timeoutId); continue; }
+      const html = await res.text();
+      clearTimeout(timeoutId);
+      const lines = buildWebsiteInferenceLines(extractTextFromHtml(html), "Menu");
+      if (lines.length > 0) return lines;
+    } catch {
+      clearTimeout(timeoutId);
+    }
+  }
+  return [];
 }
 
 function slugify(name: string): string {
@@ -367,9 +469,9 @@ async function extractWithRetry(
   }
 }
 
-const EXTRACTION_SYSTEM_PROMPT = `You are an expert at extracting toddler-friendliness signals from restaurant reviews.
+const EXTRACTION_SYSTEM_PROMPT = `You are an expert at extracting toddler-friendliness signals from restaurant reviews and website content.
 
-Given a set of reviews, extract the following information and return it as JSON:
+Given a set of reviews and optionally menu/website content, extract the following information and return it as JSON:
 {
   "high_chairs": true | false | "unknown",
   "pram_space": true | false | "unknown",
@@ -390,10 +492,24 @@ Given a set of reviews, extract the following information and return it as JSON:
 }
 
 Rules:
-- Only set true/false if there is clear evidence. Use "unknown" if not mentioned.
+- A SINGLE piece of evidence is enough to mark a feature true or false — you do not need multiple sources.
+- Use inferential reasoning: indirect language counts as evidence. Examples:
+  - "brought a high chair without us asking" → high_chairs: true
+  - "staff fetched a booster seat for our toddler" → high_chairs: true
+  - "kids meal available" / "little ones menu" / "mini menu" → kids_menu: true
+  - "little ones" section on a menu page → kids_menu: true
+  - "plenty of room for us all including the pushchair" → pram_space: true
+  - "baby-friendly toilets" / "parent and baby room" → changing_table: true
+  - "nowhere to change the baby" → changing_table: false
+  - "no high chairs available" → high_chairs: false
+  - "very loud and echoey" → noise_tolerant: false
+  - "relaxed and easy-going, kids welcome" → noise_tolerant: true
+- Mark false only if the source explicitly states the feature is absent or unsuitable.
+- Use "unknown" only when there is genuinely no evidence either way.
 - negative_signals: list specific concerns (cramped, loud, not welcoming, etc.)
 - evidence_quotes: pick 3-5 concise verbatim phrases that best illustrate toddler-friendliness.
-- feature_evidence: for EACH feature, list every verbatim quote that directly supports it. Use an empty array if there is no evidence. If multiple reviews mention the same feature, include a quote from each.
+- feature_evidence: for EACH feature, list every verbatim quote that directly supports it. Use an empty array if there is no evidence.
+- If menu or website content is included (prefixed [Menu] or [Website]), use it to infer kids_menu and high_chairs.
 - Return only the JSON object, no prose.`;
 
 const SUMMARY_SYSTEM_PROMPT = `You write concise, factual summaries for a toddler-friendly restaurant guide.
@@ -503,6 +619,7 @@ async function runAnalysis(
   price_level?: number | null,
   google_rating?: number | null,
   google_review_count?: number | null,
+  websiteUrl?: string | null,
 ): Promise<{
   toddler_score: number;
   confidence: number;
@@ -525,8 +642,27 @@ async function runAnalysis(
 
   console.log(`[ingest] Venue profile for "${venueName}": adjustment=${venueAdjustment.toFixed(2)}, signals=${venueSignals.length}`);
 
+  let websiteLines: string[] = [];
+  if (websiteUrl) {
+    try {
+      const [siteLines, menuLines] = await Promise.all([
+        scrapeWebsiteForFamilyInfo(websiteUrl),
+        scrapeMenuPageForFamilyInfo(websiteUrl),
+      ]);
+      websiteLines = [...siteLines, ...menuLines];
+      if (websiteLines.length > 0) {
+        console.log(`[ingest] Website scrape found ${websiteLines.length} inference(s) for "${venueName}"`);
+      }
+    } catch (err) {
+      console.warn(`[ingest] Website scrape failed for "${venueName}":`, err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const truncated = truncateReviews(reviews);
-  const reviewBlock = truncated.map((r, i) => `Review ${i + 1}:\n${r}`).join("\n\n");
+  const reviewBlock = [
+    ...truncated.map((r, i) => `Review ${i + 1}:\n${r}`),
+    ...websiteLines,
+  ].join("\n\n");
 
   let extracted: ExtractionResult;
   try {
@@ -619,6 +755,7 @@ Deno.serve(async (req: Request) => {
       primary_type,
       secondary_types,
       price_level,
+      website,
     } = body;
 
     if (!name) {
@@ -633,7 +770,7 @@ Deno.serve(async (req: Request) => {
     const { data: existing } = await supabase
       .from("restaurants")
       .select(
-        "id, place_id, cached_reviews, last_review_fetch, last_analysed_at, google_rating, google_review_count, image_url, venue_type, address",
+        "id, place_id, cached_reviews, last_review_fetch, last_analysed_at, google_rating, google_review_count, image_url, venue_type, address, website",
       )
       .eq("id", id)
       .maybeSingle();
@@ -659,6 +796,8 @@ Deno.serve(async (req: Request) => {
 
     let analysisResult: Awaited<ReturnType<typeof runAnalysis>> | null = null;
 
+    const effectiveWebsite = website ?? row?.website ?? null;
+
     if (reviewsToAnalyse.length > 0) {
       analysisResult = await runAnalysis(
         reviewsToAnalyse,
@@ -670,6 +809,7 @@ Deno.serve(async (req: Request) => {
         price_level,
         google_rating ?? row?.google_rating ?? null,
         google_review_count ?? row?.google_review_count ?? null,
+        effectiveWebsite,
       );
     }
 

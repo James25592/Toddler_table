@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, X, RefreshCw, Database, CircleCheck as CheckCircle, CircleAlert as AlertCircle, Loader as Loader2 } from 'lucide-react';
+import { Settings, X, RefreshCw, Database, CircleCheck as CheckCircle, CircleAlert as AlertCircle, Loader as Loader2, FlaskConical, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface FetchResult {
   inserted: number;
@@ -10,6 +10,23 @@ interface FetchResult {
   message: string;
   error_details?: { name: string; error: string }[];
   inserted_names?: string[];
+}
+
+interface ReanalyseSignals {
+  toddler_score: number;
+  confidence: number;
+  positive_signals: number;
+  negative_signals: number;
+}
+
+interface ReanalyseResult {
+  id: string;
+  name: string;
+  website: string | null;
+  before: ReanalyseSignals;
+  after: ReanalyseSignals | null;
+  website_scraped: boolean;
+  error?: string;
 }
 
 export default function AdminPanel() {
@@ -21,6 +38,9 @@ export default function AdminPanel() {
   const [skipExisting, setSkipExisting] = useState(true);
   const [dbCount, setDbCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [reanalyseLoading, setReanalyseLoading] = useState(false);
+  const [reanalyseResults, setReanalyseResults] = useState<ReanalyseResult[] | null>(null);
+  const [reanalyseError, setReanalyseError] = useState<string | null>(null);
 
   async function fetchDbCount() {
     setLoadingCount(true);
@@ -66,6 +86,31 @@ export default function AdminPanel() {
     }
   }
 
+  async function handleReanalyse() {
+    setReanalyseLoading(true);
+    setReanalyseResults(null);
+    setReanalyseError(null);
+    try {
+      const res = await fetch('/api/reanalyse-sample', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setReanalyseError(data.error ?? 'Unknown error');
+      } else {
+        setReanalyseResults(data.results);
+      }
+    } catch (err) {
+      setReanalyseError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setReanalyseLoading(false);
+    }
+  }
+
+  function scoreDelta(before: number, after: number) {
+    const d = after - before;
+    if (Math.abs(d) < 0.05) return null;
+    return d;
+  }
+
   return (
     <>
       <button
@@ -82,7 +127,7 @@ export default function AdminPanel() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md border border-stone-200 overflow-hidden">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl border border-stone-200 overflow-hidden max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 bg-stone-100 rounded-lg flex items-center justify-center">
@@ -186,6 +231,108 @@ export default function AdminPanel() {
                   <p className="text-xs text-red-700">{error}</p>
                 </div>
               )}
+
+              <div className="border-t border-stone-100 pt-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 bg-amber-50 rounded-lg flex items-center justify-center">
+                    <FlaskConical className="w-3.5 h-3.5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-stone-900">Re-analyse sample</p>
+                    <p className="text-xs text-stone-500">Re-run analysis on 10 random restaurants with website scraping</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleReanalyse}
+                  disabled={reanalyseLoading}
+                  className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white font-medium text-sm rounded-xl px-4 py-2.5 transition-colors"
+                >
+                  {reanalyseLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Re-analysing (this takes ~30s)...
+                    </>
+                  ) : (
+                    <>
+                      <FlaskConical className="w-4 h-4" />
+                      Run re-analysis on 10 restaurants
+                    </>
+                  )}
+                </button>
+
+                {reanalyseError && (
+                  <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-700">{reanalyseError}</p>
+                  </div>
+                )}
+
+                {reanalyseResults && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-stone-600">
+                      Results — {reanalyseResults.filter(r => !r.error).length} succeeded, {reanalyseResults.filter(r => r.error).length} failed
+                    </p>
+                    <div className="border border-stone-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-stone-50 border-b border-stone-200">
+                            <th className="text-left px-3 py-2 font-medium text-stone-600">Restaurant</th>
+                            <th className="text-center px-3 py-2 font-medium text-stone-600">Score</th>
+                            <th className="text-center px-3 py-2 font-medium text-stone-600">+Signals</th>
+                            <th className="text-center px-3 py-2 font-medium text-stone-600">Web</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reanalyseResults.map((r) => {
+                            const delta = r.after ? scoreDelta(r.before.toddler_score, r.after.toddler_score) : null;
+                            const signalGain = r.after ? r.after.positive_signals - r.before.positive_signals : null;
+                            return (
+                              <tr key={r.id} className="border-b border-stone-100 last:border-0 hover:bg-stone-50 transition-colors">
+                                <td className="px-3 py-2.5">
+                                  <p className="font-medium text-stone-800 truncate max-w-[160px]">{r.name}</p>
+                                  {r.error && <p className="text-red-500 truncate max-w-[160px]">{r.error}</p>}
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  {r.after ? (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-stone-700">{r.before.toddler_score.toFixed(1)} → {r.after.toddler_score.toFixed(1)}</span>
+                                      {delta !== null ? (
+                                        <span className={`flex items-center gap-0.5 font-semibold ${delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                          {delta > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                          {delta > 0 ? '+' : ''}{delta.toFixed(1)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-stone-400 flex items-center gap-0.5"><Minus className="w-3 h-3" />no change</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-stone-400">—</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  {signalGain !== null ? (
+                                    <span className={`font-semibold ${signalGain > 0 ? 'text-emerald-600' : signalGain < 0 ? 'text-red-500' : 'text-stone-400'}`}>
+                                      {signalGain > 0 ? `+${signalGain}` : signalGain === 0 ? '—' : signalGain}
+                                    </span>
+                                  ) : <span className="text-stone-400">—</span>}
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  {r.website_scraped ? (
+                                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" title="Website scraped" />
+                                  ) : (
+                                    <span className="inline-block w-2 h-2 rounded-full bg-stone-200" title="No website" />
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

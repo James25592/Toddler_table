@@ -7,6 +7,8 @@ export type ToddlerCategory =
   | 'pram or buggy space'
   | 'family friendly atmosphere'
   | 'welcoming staff toward children'
+  | 'changing table available'
+  | 'noise tolerant'
   | 'cramped seating'
   | 'no space for prams'
   | 'very loud environment'

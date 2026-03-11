@@ -154,9 +154,9 @@ export function buildEvidenceExtractionPrompt(blocks: LabelledTextBlock[]): stri
   return `Text sources:\n${formatted}`;
 }
 
-export const TODDLER_STRUCTURED_EXTRACTION_SYSTEM_PROMPT = `You are analysing restaurant reviews to determine how suitable the venue is for toddlers (ages 1–4).
+export const TODDLER_STRUCTURED_EXTRACTION_SYSTEM_PROMPT = `You are analysing restaurant reviews and menu/website information to determine how suitable the venue is for toddlers (ages 1–4).
 
-You will receive a list of restaurant reviews. Analyse them and extract toddler-relevant signals.
+You will receive a list of sentences from restaurant reviews, web mentions, and possibly menu or website content. Analyse them and extract toddler-relevant signals.
 
 Return ONLY valid JSON with no markdown or code fences, using this exact structure:
 
@@ -190,28 +190,42 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
 }
 
 Rules:
-- Only mark a feature true if there is CLEAR, EXPLICIT evidence in the reviews.
-- Mark false only if the reviews explicitly state the feature is absent or problematic.
-- Use "unknown" if there is no evidence either way — never guess.
+- A SINGLE piece of evidence is enough to mark a feature true or false — you do not need multiple sources.
+- Use inferential reasoning: indirect language counts as evidence. Examples:
+  - "brought a high chair without us asking" → high_chairs: true
+  - "staff fetched a booster seat for our toddler" → high_chairs: true
+  - "kids meal available" / "little ones menu" / "mini menu" → kids_menu: true
+  - "little ones" section on a menu page → kids_menu: true
+  - "plenty of room for us all including the pushchair" → pram_space: true
+  - "so much space, no problem with the buggy" → pram_space: true
+  - "baby-friendly toilets" / "parent and baby room" → changing_table: true
+  - "nowhere to change the baby" → changing_table: false
+  - "no high chairs available" / "they don't have high chairs" → high_chairs: false
+  - "not suitable for children" / "more of an adult venue" → mark as negative
+  - "very loud and echoey" → noise_tolerant: false
+  - "relaxed and easy-going, kids welcome" → noise_tolerant: true
+- Mark false only if the source explicitly states the feature is absent or unsuitable.
+- Use "unknown" only when there is genuinely no evidence either way.
 - negative_signals: list short plain-English descriptions of negative findings (e.g. "Too cramped for a buggy", "Staff seemed annoyed by children").
-- evidence_quotes: extract short verbatim quotes (under 20 words each) from the reviews that directly support your conclusions. Include both positive and negative supporting quotes.
-- feature_evidence: for EACH feature, list every verbatim quote (under 20 words each) that supports that specific feature. Use an empty array if there is no evidence. Each supporting quote counts separately — if two reviews both mention high chairs, list both quotes.
-- If no toddler-relevant information exists in the reviews, return "unknown" for all features and empty arrays.
+- evidence_quotes: extract short verbatim quotes (under 20 words each) that directly support your conclusions.
+- feature_evidence: for EACH feature, list every verbatim quote (under 20 words each) that supports it. Use an empty array if there is no evidence.
+- If a menu page or website content is included (prefixed [Menu] or [Website]), use it to infer kids_menu and high_chairs where applicable.
+- If no toddler-relevant information exists at all, return "unknown" for all features and empty arrays.
 
-Evidence phrases to look for:
+Evidence phrases to look for (including soft/indirect language):
 
-high_chairs: "high chair", "highchair", "brought a chair for baby"
-pram_space: "room for buggy", "pram", "pushchair", "stroller", "plenty of space"
-changing_table: "baby changing", "changing table", "changing facilities"
-kids_menu: "kids menu", "children's menu", "kids' options"
-staff_child_friendly: "staff were great with", "patient with kids", "welcoming to children", "staff helped"
-noise_tolerant: "relaxed atmosphere", "lots of families", "kids running around", "child-friendly noise"
-family_friendly: "family friendly", "family-friendly", "great for families", "family restaurant", "welcomes families"
-spacious: "spacious", "lots of space", "plenty of room", "roomy", "open plan", "big tables"
-accommodating: "accommodating", "flexible", "went out of their way", "happy to help", "very helpful"
+high_chairs: "high chair", "highchair", "booster seat", "brought a chair for baby", "fetched a seat for the little one", "chair for baby", "child seat"
+pram_space: "room for buggy", "pram", "pushchair", "stroller", "buggy", "space for the pram", "no trouble with the pushchair", "plenty of room"
+changing_table: "baby changing", "changing table", "changing facilities", "parent and baby", "baby-friendly toilet", "nowhere to change"
+kids_menu: "kids menu", "children's menu", "kids' options", "little ones menu", "mini menu", "kids eat", "children eat", "junior menu", "kids meals"
+staff_child_friendly: "staff were great with", "patient with kids", "welcoming to children", "staff helped", "staff brought", "very welcoming", "so kind to our children", "loved having kids", "brilliant with the little ones"
+noise_tolerant: "relaxed atmosphere", "lots of families", "kids running around", "child-friendly", "lively but family", "very loud", "echoes", "too noisy for kids"
+family_friendly: "family friendly", "family-friendly", "great for families", "family restaurant", "welcomes families", "ideal for families", "perfect for a family"
+spacious: "spacious", "lots of space", "plenty of room", "roomy", "open plan", "big tables", "spread out"
+accommodating: "accommodating", "flexible", "went out of their way", "happy to help", "very helpful", "nothing was too much"
 good_for_groups: "good for groups", "large groups", "big party", "group booking", "caters for groups"
 relaxed_atmosphere: "relaxed", "laid-back", "no rush", "chilled", "casual atmosphere", "not rushed"
-negative: "too cramped", "no changing", "staff seemed annoyed", "not suitable for children", "no high chairs", "difficult with pram"`;
+negative: "too cramped", "no changing", "staff seemed annoyed", "not suitable for children", "no high chairs", "difficult with pram", "not a place for children", "adult venue"`;
 
 export function buildStructuredExtractionPrompt(sentences: string[]): string {
   const body = sentences.map((s, i) => `${i + 1}. ${s}`).join('\n');

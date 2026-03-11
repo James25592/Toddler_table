@@ -90,15 +90,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const guildfordPlaces = places.filter((p) =>
+    p.address?.toLowerCase().includes('guildford')
+  );
+
+  const nonGuildford = places.length - guildfordPlaces.length;
+
   const toProcess = skipExisting
-    ? places.filter((p) => !existingPlaceIds.has(p.place_id))
-    : places;
+    ? guildfordPlaces.filter((p) => !existingPlaceIds.has(p.place_id))
+    : guildfordPlaces;
 
   if (toProcess.length === 0) {
     return NextResponse.json({
       inserted: 0,
-      skipped: places.length,
-      message: 'All fetched venues already exist in the database.',
+      skipped: guildfordPlaces.length,
+      errors: 0,
+      message: `All fetched Guildford venues already exist in the database.${nonGuildford > 0 ? ` ${nonGuildford} non-Guildford venues were excluded.` : ''}`,
     });
   }
 
@@ -159,13 +166,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const alreadyExisted = guildfordPlaces.length - toProcess.length;
+  const excludedMsg = nonGuildford > 0 ? ` ${nonGuildford} non-Guildford venues were excluded.` : '';
+
   return NextResponse.json({
     inserted: inserted.length,
-    skipped: places.length - toProcess.length,
+    skipped: alreadyExisted,
     errors: errors.length,
     error_details: errors.length > 0 ? errors : undefined,
     inserted_names: inserted,
-    message: `Inserted ${inserted.length} new venues. ${places.length - toProcess.length} already existed and were skipped.`,
+    message: `Inserted ${inserted.length} new Guildford venues. ${alreadyExisted} already existed and were skipped.${excludedMsg}`,
   });
 }
 

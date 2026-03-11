@@ -9,7 +9,7 @@ const corsHeaders = {
 };
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
-const CLAUDE_MODEL = "claude-3-5-haiku-20241022";
+const CLAUDE_MODEL = "claude-haiku-4-5-20251001";
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
 const REVIEW_CACHE_TTL_DAYS = 7;
 
@@ -334,30 +334,33 @@ function parseAndValidateExtraction(raw: string, context: string): ExtractionRes
   return result.data;
 }
 
+function extractJsonFromText(text: string): string {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  return jsonMatch ? jsonMatch[0] : text;
+}
+
 async function extractWithRetry(
   systemPrompt: string,
   userMessage: string,
   apiKey: string,
   context: string,
 ): Promise<ExtractionResult> {
-  let rawText = await callClaudeWithJsonSchema(systemPrompt, userMessage, apiKey, 1024);
-
-  if (!rawText) {
-    rawText = await callClaude(systemPrompt, userMessage, apiKey, 1024);
-  }
+  const rawText = await callClaude(systemPrompt, userMessage, apiKey, 1024);
+  const cleaned = extractJsonFromText(rawText);
 
   let firstError: Error | null = null;
   try {
-    return parseAndValidateExtraction(rawText, context);
+    return parseAndValidateExtraction(cleaned, context);
   } catch (err) {
     firstError = err instanceof Error ? err : new Error(String(err));
     console.warn(`[ingest] First parse attempt failed (${context}), retrying...`);
   }
 
   const retryRaw = await callClaude(systemPrompt, userMessage, apiKey, 1024);
+  const retryCleaned = extractJsonFromText(retryRaw);
 
   try {
-    return parseAndValidateExtraction(retryRaw, `${context}-retry`);
+    return parseAndValidateExtraction(retryCleaned, `${context}-retry`);
   } catch {
     console.error(`[ingest] Retry also failed (${context}). Original error:`, firstError?.message);
     throw firstError ?? new Error(`Extraction failed after retry (${context})`);
@@ -528,7 +531,8 @@ async function runAnalysis(
   try {
     extracted = await extractWithRetry(EXTRACTION_SYSTEM_PROMPT, reviewBlock, anthropicKey, "ingest-extraction");
   } catch (err) {
-    console.error("[ingest] Extraction failed after retry:", err instanceof Error ? err.message : err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[ingest] Extraction failed after retry:", errMsg);
     const fallbackScore = Math.min(5, Math.max(0, 2.5 + venueAdjustment));
     return {
       toddler_score: fallbackScore,

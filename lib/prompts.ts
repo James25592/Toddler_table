@@ -213,11 +213,9 @@ good_for_groups: "good for groups", "large groups", "big party", "group booking"
 relaxed_atmosphere: "relaxed", "laid-back", "no rush", "chilled", "casual atmosphere", "not rushed"
 negative: "too cramped", "no changing", "staff seemed annoyed", "not suitable for children", "no high chairs", "difficult with pram"`;
 
-export function buildStructuredExtractionPrompt(reviews: string[]): string {
-  const reviewText = reviews
-    .map((r, i) => `Review ${i + 1}:\n${r}`)
-    .join('\n\n');
-  return `Reviews to analyse:\n\n${reviewText}`;
+export function buildStructuredExtractionPrompt(sentences: string[]): string {
+  const body = sentences.map((s, i) => `${i + 1}. ${s}`).join('\n');
+  return `Text to analyse:\n\n${body}`;
 }
 
 export const TODDLER_CARD_SUMMARY_SYSTEM_PROMPT = `You write short, honest summaries for parents deciding whether to visit a restaurant with a toddler.

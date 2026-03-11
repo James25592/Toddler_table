@@ -13,6 +13,9 @@ import {
 import { getCachedAnalysis, setCachedAnalysis } from './cache';
 import { scoreStructuredExtraction } from './scoring';
 import { fetchExternalRestaurantMentions } from './search';
+import { prepareReviewContext } from './reviewPreparation';
+import { fetchSubmissionsForRestaurant } from './submissions';
+import { fetchDetailedSubmissions } from './detailedSubmissions';
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-3-5-haiku-20241022';
@@ -302,26 +305,11 @@ async function extractWithRetry(
 }
 
 export async function extractStructuredEvidence(
-  reviews: string[],
+  sentences: string[],
   apiKey: string,
 ): Promise<StructuredExtractionResult> {
-  const userMessage = buildStructuredExtractionPrompt(reviews);
+  const userMessage = buildStructuredExtractionPrompt(sentences);
   return extractWithRetry(userMessage, apiKey, 'structured-extraction');
-}
-
-const MAX_REVIEWS_CHARS = 3000;
-
-function truncateReviews(reviews: string[]): string[] {
-  const result: string[] = [];
-  let total = 0;
-  for (const review of reviews) {
-    if (total >= MAX_REVIEWS_CHARS) break;
-    const remaining = MAX_REVIEWS_CHARS - total;
-    const text = review.length > remaining ? review.slice(0, remaining) : review;
-    result.push(text);
-    total += text.length;
-  }
-  return result;
 }
 
 const FALLBACK_RESULT: AnalysisResult & { _filtered_sentences: string[] } = {
@@ -360,19 +348,30 @@ export async function analyseRestaurantReviews(
         console.warn(
           `[analyse] External search unavailable${place_id ? ` (place_id: ${place_id})` : ''}: ${err instanceof Error ? err.message : String(err)}`,
         );
-        snippetTexts = [];
       }
     }
 
-    const allReviews = [...reviews_to_analyse, ...snippetTexts];
-    if (allReviews.length === 0) {
+    const [parentSubmissions, detailedSubmissions] = place_id
+      ? await Promise.all([
+          fetchSubmissionsForRestaurant(place_id).catch(() => []),
+          fetchDetailedSubmissions(place_id).catch(() => []),
+        ])
+      : [[], []];
+
+    const preparedSentences = prepareReviewContext({
+      googleReviews: reviews_to_analyse,
+      searchSnippets: snippetTexts,
+      parentSubmissions,
+      detailedSubmissions,
+    });
+
+    if (preparedSentences.length === 0) {
       return FALLBACK_RESULT;
     }
 
     let extracted: StructuredExtractionResult;
     try {
-      const truncated = truncateReviews(allReviews);
-      extracted = await extractStructuredEvidence(truncated, apiKey);
+      extracted = await extractStructuredEvidence(preparedSentences, apiKey);
     } catch (err) {
       console.error(
         `[analyse] Extraction failed${place_id ? ` (place_id: ${place_id})` : ''}: ${err instanceof Error ? err.message : String(err)}`,

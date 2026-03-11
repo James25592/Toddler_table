@@ -77,6 +77,11 @@ export interface FeatureEvidence {
   kids_menu: string[];
   staff_child_friendly: string[];
   noise_tolerant: string[];
+  family_friendly: string[];
+  spacious: string[];
+  accommodating: string[];
+  good_for_groups: string[];
+  relaxed_atmosphere: string[];
 }
 
 export interface StructuredExtractionResult {
@@ -86,6 +91,11 @@ export interface StructuredExtractionResult {
   kids_menu: FeaturePresence;
   staff_child_friendly: FeaturePresence;
   noise_tolerant: FeaturePresence;
+  family_friendly: FeaturePresence;
+  spacious: FeaturePresence;
+  accommodating: FeaturePresence;
+  good_for_groups: FeaturePresence;
+  relaxed_atmosphere: FeaturePresence;
   negative_signals: string[];
   evidence_quotes: string[];
   feature_evidence: FeatureEvidence;

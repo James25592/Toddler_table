@@ -37,6 +37,11 @@ const FeatureEvidenceSchema = z.object({
   kids_menu: z.array(z.string()),
   staff_child_friendly: z.array(z.string()),
   noise_tolerant: z.array(z.string()),
+  family_friendly: z.array(z.string()),
+  spacious: z.array(z.string()),
+  accommodating: z.array(z.string()),
+  good_for_groups: z.array(z.string()),
+  relaxed_atmosphere: z.array(z.string()),
 });
 
 export const ExtractionResultSchema = z.object({
@@ -46,6 +51,11 @@ export const ExtractionResultSchema = z.object({
   kids_menu: FeaturePresenceSchema,
   staff_child_friendly: FeaturePresenceSchema,
   noise_tolerant: FeaturePresenceSchema,
+  family_friendly: FeaturePresenceSchema,
+  spacious: FeaturePresenceSchema,
+  accommodating: FeaturePresenceSchema,
+  good_for_groups: FeaturePresenceSchema,
+  relaxed_atmosphere: FeaturePresenceSchema,
   negative_signals: z.array(z.string()),
   evidence_quotes: z.array(z.string()),
   feature_evidence: FeatureEvidenceSchema,
@@ -62,34 +72,45 @@ const FEATURE_EVIDENCE_SCHEMA = {
     kids_menu: { type: 'array', items: { type: 'string' } },
     staff_child_friendly: { type: 'array', items: { type: 'string' } },
     noise_tolerant: { type: 'array', items: { type: 'string' } },
+    family_friendly: { type: 'array', items: { type: 'string' } },
+    spacious: { type: 'array', items: { type: 'string' } },
+    accommodating: { type: 'array', items: { type: 'string' } },
+    good_for_groups: { type: 'array', items: { type: 'string' } },
+    relaxed_atmosphere: { type: 'array', items: { type: 'string' } },
   },
-  required: ['high_chairs', 'pram_space', 'changing_table', 'kids_menu', 'staff_child_friendly', 'noise_tolerant'],
+  required: [
+    'high_chairs', 'pram_space', 'changing_table', 'kids_menu',
+    'staff_child_friendly', 'noise_tolerant',
+    'family_friendly', 'spacious', 'accommodating', 'good_for_groups', 'relaxed_atmosphere',
+  ],
   additionalProperties: false,
 };
+
+const FEATURE_PRESENCE = { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] };
 
 const EXTRACTION_JSON_SCHEMA = {
   type: 'object',
   properties: {
-    high_chairs: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
-    pram_space: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
-    changing_table: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
-    kids_menu: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
-    staff_child_friendly: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
-    noise_tolerant: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['unknown'] }] },
+    high_chairs: FEATURE_PRESENCE,
+    pram_space: FEATURE_PRESENCE,
+    changing_table: FEATURE_PRESENCE,
+    kids_menu: FEATURE_PRESENCE,
+    staff_child_friendly: FEATURE_PRESENCE,
+    noise_tolerant: FEATURE_PRESENCE,
+    family_friendly: FEATURE_PRESENCE,
+    spacious: FEATURE_PRESENCE,
+    accommodating: FEATURE_PRESENCE,
+    good_for_groups: FEATURE_PRESENCE,
+    relaxed_atmosphere: FEATURE_PRESENCE,
     negative_signals: { type: 'array', items: { type: 'string' } },
     evidence_quotes: { type: 'array', items: { type: 'string' } },
     feature_evidence: FEATURE_EVIDENCE_SCHEMA,
   },
   required: [
-    'high_chairs',
-    'pram_space',
-    'changing_table',
-    'kids_menu',
-    'staff_child_friendly',
-    'noise_tolerant',
-    'negative_signals',
-    'evidence_quotes',
-    'feature_evidence',
+    'high_chairs', 'pram_space', 'changing_table', 'kids_menu',
+    'staff_child_friendly', 'noise_tolerant',
+    'family_friendly', 'spacious', 'accommodating', 'good_for_groups', 'relaxed_atmosphere',
+    'negative_signals', 'evidence_quotes', 'feature_evidence',
   ],
   additionalProperties: false,
 };
@@ -366,6 +387,11 @@ export async function analyseRestaurantReviews(
       extracted.kids_menu !== 'unknown' ||
       extracted.staff_child_friendly !== 'unknown' ||
       extracted.noise_tolerant !== 'unknown' ||
+      extracted.family_friendly !== 'unknown' ||
+      extracted.spacious !== 'unknown' ||
+      extracted.accommodating !== 'unknown' ||
+      extracted.good_for_groups !== 'unknown' ||
+      extracted.relaxed_atmosphere !== 'unknown' ||
       extracted.negative_signals.length > 0;
 
     if (!hasAnySignal) {

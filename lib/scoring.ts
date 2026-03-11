@@ -87,12 +87,17 @@ interface FeatureWeight {
 }
 
 const STRUCTURED_POSITIVE_WEIGHTS: Record<string, FeatureWeight> = {
-  high_chairs:          { category: 'high chairs available',          delta: 2, minEvidence: 2 },
-  kids_menu:            { category: 'kids menu',                      delta: 2, minEvidence: 2 },
-  pram_space:           { category: 'pram or buggy space',            delta: 1, minEvidence: 1 },
-  changing_table:       { category: 'family friendly atmosphere',     delta: 1, minEvidence: 1 },
-  staff_child_friendly: { category: 'welcoming staff toward children', delta: 1, minEvidence: 1 },
-  noise_tolerant:       { category: 'family friendly atmosphere',     delta: 1, minEvidence: 1 },
+  high_chairs:          { category: 'high chairs available',           delta: 2,   minEvidence: 2 },
+  kids_menu:            { category: 'kids menu',                       delta: 2,   minEvidence: 2 },
+  pram_space:           { category: 'pram or buggy space',             delta: 1,   minEvidence: 1 },
+  changing_table:       { category: 'family friendly atmosphere',      delta: 1,   minEvidence: 1 },
+  staff_child_friendly: { category: 'welcoming staff toward children', delta: 1,   minEvidence: 1 },
+  noise_tolerant:       { category: 'family friendly atmosphere',      delta: 1,   minEvidence: 1 },
+  family_friendly:      { category: 'family friendly atmosphere',      delta: 0.5, minEvidence: 1 },
+  spacious:             { category: 'spacious seating',                delta: 0.5, minEvidence: 1 },
+  accommodating:        { category: 'welcoming staff toward children', delta: 0.5, minEvidence: 1 },
+  good_for_groups:      { category: 'family friendly atmosphere',      delta: 0.5, minEvidence: 1 },
+  relaxed_atmosphere:   { category: 'family friendly atmosphere',      delta: 0.5, minEvidence: 1 },
 };
 
 function evidenceCount(featureEvidence: FeatureEvidence, key: keyof FeatureEvidence): number {

@@ -167,6 +167,11 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
   "kids_menu": true | false | "unknown",
   "staff_child_friendly": true | false | "unknown",
   "noise_tolerant": true | false | "unknown",
+  "family_friendly": true | false | "unknown",
+  "spacious": true | false | "unknown",
+  "accommodating": true | false | "unknown",
+  "good_for_groups": true | false | "unknown",
+  "relaxed_atmosphere": true | false | "unknown",
   "negative_signals": ["short description of negative finding"],
   "evidence_quotes": ["exact short quote from a review"],
   "feature_evidence": {
@@ -175,7 +180,12 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
     "changing_table": ["verbatim quote supporting this feature"],
     "kids_menu": ["verbatim quote supporting this feature"],
     "staff_child_friendly": ["verbatim quote supporting this feature"],
-    "noise_tolerant": ["verbatim quote supporting this feature"]
+    "noise_tolerant": ["verbatim quote supporting this feature"],
+    "family_friendly": ["verbatim quote supporting this feature"],
+    "spacious": ["verbatim quote supporting this feature"],
+    "accommodating": ["verbatim quote supporting this feature"],
+    "good_for_groups": ["verbatim quote supporting this feature"],
+    "relaxed_atmosphere": ["verbatim quote supporting this feature"]
   }
 }
 
@@ -196,6 +206,11 @@ changing_table: "baby changing", "changing table", "changing facilities"
 kids_menu: "kids menu", "children's menu", "kids' options"
 staff_child_friendly: "staff were great with", "patient with kids", "welcoming to children", "staff helped"
 noise_tolerant: "relaxed atmosphere", "lots of families", "kids running around", "child-friendly noise"
+family_friendly: "family friendly", "family-friendly", "great for families", "family restaurant", "welcomes families"
+spacious: "spacious", "lots of space", "plenty of room", "roomy", "open plan", "big tables"
+accommodating: "accommodating", "flexible", "went out of their way", "happy to help", "very helpful"
+good_for_groups: "good for groups", "large groups", "big party", "group booking", "caters for groups"
+relaxed_atmosphere: "relaxed", "laid-back", "no rush", "chilled", "casual atmosphere", "not rushed"
 negative: "too cramped", "no changing", "staff seemed annoyed", "not suitable for children", "no high chairs", "difficult with pram"`;
 
 export function buildStructuredExtractionPrompt(reviews: string[]): string {

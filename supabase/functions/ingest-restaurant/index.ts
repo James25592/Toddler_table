@@ -890,8 +890,9 @@ async function runAnalysis(
     }
   }
 
+  const socialSnippets = filterToddlerReviews(reviews.filter(Boolean));
   const socialInferenceLines = await analyseSocialSnippetsIngest(
-    reviews.filter(Boolean),
+    socialSnippets,
     anthropicKey,
     venueName,
   );

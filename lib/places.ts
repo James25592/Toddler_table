@@ -101,9 +101,22 @@ export function buildAnalysisInput(
   return { name, rating, total_reviews, review_source: 'fallback', reviews_to_analyse: allReviews };
 }
 
+const OUT_OF_AREA_KEYWORDS = [
+  'shere', 'bramley', 'albury', 'chertsey', 'ottershaw', 'woking',
+  'godalming', 'farnham', 'leatherhead', 'cobham', 'esher', 'weybridge',
+  'byfleet', 'ripley', 'send', 'effingham', 'east horsley', 'west horsley',
+  'newlands corner', "newland's corner", 'gomshall', 'peaslake', 'chilworth',
+];
+
+const GUILDFORD_ONLY_POSTCODES = /\bgu[1-4]\b/i;
+
 export function isTrulyInGuildford(address: string): boolean {
-  const guildfordPostcodePattern = /\bgu[1-5]\b/i;
-  if (guildfordPostcodePattern.test(address)) return true;
+  const lower = address.toLowerCase();
+
+  if (OUT_OF_AREA_KEYWORDS.some((kw) => lower.includes(kw))) return false;
+
+  if (GUILDFORD_ONLY_POSTCODES.test(address)) return true;
+
   const parts = address.split(',').map((p) => p.trim().toLowerCase());
   for (const part of parts) {
     if (part === 'guildford' || part.startsWith('guildford ') || part.endsWith(' guildford')) {

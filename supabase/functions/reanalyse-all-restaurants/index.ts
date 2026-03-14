@@ -19,6 +19,7 @@ interface RestaurantRow {
   google_rating: number;
   google_review_count: number;
   image_url: string;
+  website: string | null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -44,7 +45,7 @@ Deno.serve(async (req: Request) => {
 
     const { data, error } = await supabase
       .from("restaurants")
-      .select("id, place_id, name, address, venue_type, google_rating, google_review_count, image_url")
+      .select("id, place_id, name, address, venue_type, google_rating, google_review_count, image_url, website")
       .order("name", { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -83,6 +84,7 @@ Deno.serve(async (req: Request) => {
             google_rating: restaurant.google_rating,
             google_review_count: restaurant.google_review_count,
             image_url: restaurant.image_url,
+            website: restaurant.website,
             force_refresh: false,
           }),
         });

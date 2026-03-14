@@ -477,7 +477,7 @@ async function analyseSocialSnippetsIngest(
   if (snippets.length === 0) return { lines: [], familySentiment: null };
   try {
     const prompt = snippets.map((s, i) => `[Snippet ${i + 1}]:\n${s}`).join("\n\n---\n\n");
-    const raw = await callClaude(SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT, prompt, apiKey, 512);
+    const raw = await callClaude(SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT, prompt, apiKey, 768);
     if (!raw.trim()) return { lines: [], familySentiment: null };
     let parsed: unknown;
     try {

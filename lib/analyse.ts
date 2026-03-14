@@ -336,7 +336,7 @@ async function analyseWebsiteMetadata(
       WEBSITE_METADATA_EXTRACTION_SYSTEM_PROMPT,
       userMessage,
       apiKey,
-      512,
+      640,
     );
     if (!raw.trim()) return [];
     let parsed: unknown;
@@ -369,7 +369,7 @@ export async function extractSocialReviewMetadata(
     SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT,
     userMessage,
     apiKey,
-    512,
+    768,
   );
 
   let parsed: unknown;

@@ -389,17 +389,17 @@ async function analyseSocialSnippets(
   snippets: string[],
   apiKey: string,
   context: string,
-): Promise<string[]> {
-  if (snippets.length === 0) return [];
+): Promise<{ inferenceLines: string[]; familySentiment: SocialReviewMetadata['family_sentiment'] }> {
+  if (snippets.length === 0) return { inferenceLines: [], familySentiment: null };
   try {
-    const { inferenceLines } = await extractSocialReviewMetadata(snippets, apiKey);
+    const { inferenceLines, metadata } = await extractSocialReviewMetadata(snippets, apiKey);
     if (inferenceLines.length > 0) {
       console.log(`[analyse] Social review metadata found ${inferenceLines.length} inference(s) for ${context}`);
     }
-    return inferenceLines;
+    return { inferenceLines, familySentiment: metadata.family_sentiment };
   } catch (err) {
     console.warn(`[analyse] Social snippet analysis failed (${context}): ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    return { inferenceLines: [], familySentiment: null };
   }
 }
 
@@ -492,7 +492,7 @@ export async function analyseRestaurantReviews(
       ...snippetTexts,
     ].filter(Boolean);
 
-    const socialInferenceLines = await analyseSocialSnippets(
+    const { inferenceLines: socialInferenceLines, familySentiment } = await analyseSocialSnippets(
       allReviewSnippets,
       apiKey,
       restaurantName ?? place_id ?? 'unknown',
@@ -551,7 +551,7 @@ export async function analyseRestaurantReviews(
 
     console.log(`[analyse] Venue profile for "${profileInput.name}": adjustment=${venueAdjustment.toFixed(2)}, signals=${venueSignals.length}`);
 
-    const scored = scoreStructuredExtraction(extracted, venueSignals, venueAdjustment);
+    const scored = scoreStructuredExtraction(extracted, venueSignals, venueAdjustment, familySentiment);
 
     const confidence =
       review_source === 'fallback'

@@ -473,29 +473,29 @@ async function analyseSocialSnippetsIngest(
   snippets: string[],
   apiKey: string,
   venueName: string,
-): Promise<string[]> {
-  if (snippets.length === 0) return [];
+): Promise<{ lines: string[]; familySentiment: SocialReviewMetadataIngest['family_sentiment'] }> {
+  if (snippets.length === 0) return { lines: [], familySentiment: null };
   try {
     const prompt = snippets.map((s, i) => `[Snippet ${i + 1}]:\n${s}`).join("\n\n---\n\n");
     const raw = await callClaude(SOCIAL_REVIEW_METADATA_SYSTEM_PROMPT, prompt, apiKey, 512);
-    if (!raw.trim()) return [];
+    if (!raw.trim()) return { lines: [], familySentiment: null };
     let parsed: unknown;
     try {
       const match = raw.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(match ? match[0] : raw);
     } catch {
       console.warn(`[ingest] Social review metadata JSON parse failed for "${venueName}"`);
-      return [];
+      return { lines: [], familySentiment: null };
     }
     const meta = parsed as SocialReviewMetadataIngest;
     const lines = socialReviewMetadataToInferenceLines(meta);
     if (lines.length > 0) {
       console.log(`[ingest] Social review metadata found ${lines.length} inference(s) for "${venueName}"`);
     }
-    return lines;
+    return { lines, familySentiment: meta.family_sentiment };
   } catch (err) {
     console.warn(`[ingest] Social snippet analysis failed for "${venueName}":`, err instanceof Error ? err.message : String(err));
-    return [];
+    return { lines: [], familySentiment: null };
   }
 }
 
@@ -786,6 +786,7 @@ function scoreExtraction(
   e: ExtractionResult,
   venueAdjustment = 0,
   venueSignals: VenueProfileSignal[] = [],
+  familySentiment: "positive" | "negative" | "mixed" | "neutral" | null = null,
 ): {
   toddler_score: number;
   confidence: number;
@@ -837,6 +838,13 @@ function scoreExtraction(
     score -= 1;
     signalCount++;
     console.log(`[scoring] ACCEPTED negative_signal: "${sig}" → -1`);
+  }
+
+  if (familySentiment === "negative" && negativeSignals.length === 0) {
+    negativeSignals.push({ category: "not_child_friendly", evidence: "Reviewers describe this venue as unwelcoming or unsuitable for families with toddlers." });
+    score -= 0.5;
+    signalCount++;
+    console.log(`[scoring] ACCEPTED family_sentiment: negative (no specific evidence) → -0.5`);
   }
 
   const toddler_score = Math.min(5, Math.max(0, score));
@@ -913,7 +921,7 @@ async function runAnalysis(
   }
 
   const socialSnippets = filterToddlerReviews(reviews.filter(Boolean));
-  const socialInferenceLines = await analyseSocialSnippetsIngest(
+  const { lines: socialInferenceLines, familySentiment } = await analyseSocialSnippetsIngest(
     socialSnippets,
     anthropicKey,
     venueName,
@@ -946,7 +954,7 @@ async function runAnalysis(
     };
   }
 
-  const scored = scoreExtraction(extracted, venueAdjustment, venueSignals);
+  const scored = scoreExtraction(extracted, venueAdjustment, venueSignals, familySentiment);
   const confidencePenalty = reviewSource === "fallback" ? 0.7 : 1;
   const scorePenalty = reviewSource === "fallback" ? 0.9 : 1;
 

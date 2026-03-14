@@ -122,6 +122,7 @@ export function scoreStructuredExtraction(
   input: StructuredExtractionResult,
   venueProfileSignals: VenueProfileSignal[] = [],
   venueProfileAdjustment = 0,
+  familySentiment: 'positive' | 'negative' | 'mixed' | 'neutral' | null = null,
 ): ScoringResult {
   const positive_signals: AnalysisSignal[] = [];
   const negative_signals: AnalysisSignal[] = [];
@@ -163,6 +164,13 @@ export function scoreStructuredExtraction(
     score -= 1;
     signalCount++;
     console.log(`[scoring] ACCEPTED negative_signal: "${neg}" → -1`);
+  }
+
+  if (familySentiment === 'negative' && negative_signals.length === 0) {
+    negative_signals.push({ category: 'not suitable for children', evidence: 'Reviewers describe this venue as unwelcoming or unsuitable for families with toddlers.' });
+    score -= 0.5;
+    signalCount++;
+    console.log(`[scoring] ACCEPTED family_sentiment: negative (no specific evidence) → -0.5`);
   }
 
   const toddler_score = Math.min(5, Math.max(0, score));

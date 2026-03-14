@@ -1,5 +1,6 @@
 import { getSupabaseClient } from './supabase';
-import { Restaurant, AnalysisSignal, ReviewEvidence } from './types';
+import { Restaurant, AnalysisSignal, ReviewEvidence, SignalBreakdown } from './types';
+import { applyManualAmenities, ManualAmenityInput } from './scoring';
 
 interface DbRestaurant {
   id: string;
@@ -26,9 +27,24 @@ interface DbRestaurant {
   last_analysed_at: string | null;
   created_at: string;
   updated_at: string;
+  signal_breakdown: SignalBreakdown | null;
+  manual_amenities: ManualAmenityInput | null;
 }
 
 function dbRowToRestaurant(row: DbRestaurant): Restaurant {
+  let toddlerScore = Number(row.toddler_score);
+  let signalBreakdown: SignalBreakdown = row.signal_breakdown ?? {
+    venue_profile: [],
+    ai_review_signals: [...(row.positive_signals ?? []), ...(row.negative_signals ?? [])],
+    parent_confirmations: [],
+  };
+
+  if (row.manual_amenities) {
+    const applied = applyManualAmenities(toddlerScore, signalBreakdown, row.manual_amenities);
+    toddlerScore = applied.toddler_score;
+    signalBreakdown = applied.signal_breakdown;
+  }
+
   const restaurant: Restaurant = {
     id: row.id,
     name: row.name,
@@ -36,7 +52,7 @@ function dbRowToRestaurant(row: DbRestaurant): Restaurant {
     type: row.venue_type as Restaurant['type'],
     googleRating: Number(row.google_rating),
     googleReviewCount: row.google_review_count,
-    toddlerScore: Number(row.toddler_score),
+    toddlerScore,
     confidence: Number(row.confidence),
     summary: row.summary,
     image: row.image_url,
@@ -51,6 +67,7 @@ function dbRowToRestaurant(row: DbRestaurant): Restaurant {
   };
   (restaurant as unknown as { toddler_features: Record<string, unknown> }).toddler_features =
     row.toddler_features ?? {};
+  (restaurant as unknown as { signal_breakdown: SignalBreakdown }).signal_breakdown = signalBreakdown;
   return restaurant;
 }
 

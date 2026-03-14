@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, X, RefreshCw, Database, CircleCheck as CheckCircle, CircleAlert as AlertCircle, Loader as Loader2, FlaskConical, TrendingUp, TrendingDown, Minus, Zap } from 'lucide-react';
+import { Settings, X, RefreshCw, Database, CircleCheck as CheckCircle, CircleAlert as AlertCircle, Loader as Loader2, FlaskConical, TrendingUp, TrendingDown, Minus, Zap, ClipboardList } from 'lucide-react';
+import AmenityEditor from './AmenityEditor';
 
 interface FetchResult {
   inserted: number;
@@ -387,6 +388,19 @@ export default function AdminPanel() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="border-t border-stone-100 pt-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 bg-teal-50 rounded-lg flex items-center justify-center">
+                    <ClipboardList className="w-3.5 h-3.5 text-teal-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-stone-900">Manual amenity data</p>
+                    <p className="text-xs text-stone-500">Override AI scoring with confirmed amenity facts (treated as 100% accurate)</p>
+                  </div>
+                </div>
+                <AmenityEditor />
               </div>
 
               <div className="border-t border-stone-100 pt-5 space-y-3">

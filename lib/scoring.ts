@@ -114,6 +114,8 @@ const STRUCTURED_POSITIVE_WEIGHTS: Record<string, FeatureWeight> = {
   outdoor_seating:      { category: 'spacious seating',                delta: 0.5, minEvidence: 1 },
 };
 
+const KIDS_MENU_NEGATIVE_WEIGHT = 0.5;
+
 function evidenceCount(featureEvidence: FeatureEvidence, key: keyof FeatureEvidence): number {
   return featureEvidence[key]?.length ?? 0;
 }
@@ -136,6 +138,8 @@ export function scoreStructuredExtraction(
     const value = input[key as keyof StructuredExtractionResult];
     const quotes = evidenceCount(fe, feKey);
 
+    const negativeDelta = key === 'kids_menu' ? KIDS_MENU_NEGATIVE_WEIGHT : weight.delta;
+
     if (value === true) {
       if (quotes >= weight.minEvidence) {
         positive_signals.push({ category: weight.category, evidence: (fe[feKey][0] ?? '') });
@@ -148,9 +152,9 @@ export function scoreStructuredExtraction(
     } else if (value === false) {
       if (quotes >= weight.minEvidence) {
         negative_signals.push({ category: weight.category, evidence: (fe[feKey][0] ?? '') });
-        score -= weight.delta;
+        score -= negativeDelta;
         signalCount++;
-        console.log(`[scoring] ACCEPTED ${key}: false — ${quotes} quote(s) (required ${weight.minEvidence}) → -${weight.delta}`);
+        console.log(`[scoring] ACCEPTED ${key}: false — ${quotes} quote(s) (required ${weight.minEvidence}) → -${negativeDelta}`);
       } else {
         console.log(`[scoring] REJECTED ${key}: false — only ${quotes} quote(s), required ${weight.minEvidence} → treated as unknown`);
       }
@@ -192,6 +196,70 @@ export function scoreStructuredExtraction(
       parent_confirmations: [],
     },
   };
+}
+
+export interface ManualAmenityInput {
+  high_chairs: boolean | null;
+  kids_menu: boolean | null;
+  pram_space: boolean | null;
+  changing_table: boolean | null;
+  outdoor_seating: boolean | null;
+  play_area: boolean | null;
+  noise_tolerant: boolean | null;
+  staff_child_friendly: boolean | null;
+  notes: string | null;
+}
+
+const MANUAL_AMENITY_DELTAS: Record<keyof Omit<ManualAmenityInput, 'notes'>, { positive: number; negative: number; label: ToddlerCategory }> = {
+  high_chairs:          { positive: 2,   negative: -1.5, label: 'high chairs available' },
+  kids_menu:            { positive: 2,   negative: -0.5, label: 'kids menu' },
+  pram_space:           { positive: 1,   negative: -1,   label: 'pram or buggy space' },
+  changing_table:       { positive: 1,   negative: -0.5, label: 'changing table available' },
+  outdoor_seating:      { positive: 0.5, negative: -0.5, label: 'spacious seating' },
+  play_area:            { positive: 1,   negative: -0.5, label: 'family friendly atmosphere' },
+  noise_tolerant:       { positive: 1,   negative: -1,   label: 'noise tolerant' },
+  staff_child_friendly: { positive: 1,   negative: -1,   label: 'welcoming staff toward children' },
+};
+
+export function applyManualAmenities(
+  baseScore: number,
+  baseSignalBreakdown: SignalBreakdown,
+  manual: ManualAmenityInput,
+): { toddler_score: number; signal_breakdown: SignalBreakdown } {
+  let score = baseScore;
+  const manualPositive: AnalysisSignal[] = [];
+  const manualNegative: AnalysisSignal[] = [];
+
+  for (const [key, cfg] of Object.entries(MANUAL_AMENITY_DELTAS)) {
+    const value = manual[key as keyof Omit<ManualAmenityInput, 'notes'>];
+    if (value === null || value === undefined) continue;
+
+    if (value === true) {
+      score += cfg.positive;
+      manualPositive.push({ category: cfg.label, evidence: 'Confirmed by venue admin', source: 'venue_profile' });
+    } else {
+      score += cfg.negative;
+      manualNegative.push({ category: cfg.label, evidence: 'Confirmed absent by venue admin', source: 'venue_profile' });
+    }
+  }
+
+  if (manual.notes) {
+    manualPositive.push({ category: 'family friendly atmosphere', evidence: manual.notes, source: 'venue_profile' });
+  }
+
+  const toddler_score = Math.min(5, Math.max(0, score));
+
+  const signal_breakdown: SignalBreakdown = {
+    venue_profile: baseSignalBreakdown.venue_profile,
+    ai_review_signals: baseSignalBreakdown.ai_review_signals,
+    parent_confirmations: [
+      ...baseSignalBreakdown.parent_confirmations,
+      ...manualPositive,
+      ...manualNegative,
+    ],
+  };
+
+  return { toddler_score, signal_breakdown };
 }
 
 export function computeStressLevel(

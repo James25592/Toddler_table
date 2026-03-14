@@ -24,6 +24,7 @@ export const TODDLER_KEYWORDS = [
 const SEARCH_QUERIES = [
   'restaurants in Guildford UK',
   'cafes in Guildford UK',
+  'coffee shops in Guildford UK',
   'family restaurants Guildford',
   'pubs with food Guildford UK',
   'brunch Guildford UK',
@@ -42,6 +43,9 @@ const SEARCH_QUERIES = [
   'takeaway Guildford UK',
   'brasserie Guildford UK',
   'wine bar Guildford UK',
+  'Costa Coffee Guildford',
+  'Starbucks Guildford',
+  'cafe Guildford town centre',
 ];
 
 export interface PlaceSearchResult {
@@ -97,6 +101,18 @@ export function buildAnalysisInput(
   return { name, rating, total_reviews, review_source: 'fallback', reviews_to_analyse: allReviews };
 }
 
+export function isTrulyInGuildford(address: string): boolean {
+  const guildfordPostcodePattern = /\bgu[1-5]\b/i;
+  if (guildfordPostcodePattern.test(address)) return true;
+  const parts = address.split(',').map((p) => p.trim().toLowerCase());
+  for (const part of parts) {
+    if (part === 'guildford' || part.startsWith('guildford ') || part.endsWith(' guildford')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function searchByQuery(
   query: string,
   apiKey: string,
@@ -105,8 +121,11 @@ async function searchByQuery(
   const results: PlaceSearchResult[] = [];
   let nextPageToken: string | undefined;
 
+  const isCafeQuery = /coffee|cafe/i.test(query);
+  const searchType = isCafeQuery ? 'cafe' : 'restaurant';
+
   while (results.length < maxPerQuery) {
-    const params = new URLSearchParams({ query, type: 'restaurant', key: apiKey });
+    const params = new URLSearchParams({ query, type: searchType, key: apiKey });
     const url = nextPageToken
       ? `${PLACES_API_BASE}/textsearch/json?${params}&pagetoken=${nextPageToken}`
       : `${PLACES_API_BASE}/textsearch/json?${params}`;

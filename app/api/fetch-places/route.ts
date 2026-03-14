@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { searchAllGuildfordVenues } from '@/lib/places';
+import { searchAllGuildfordVenues, isTrulyInGuildford } from '@/lib/places';
 import { getSupabaseClient } from '@/lib/supabase';
 
 const PEXELS_FALLBACK_IMAGES = [
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
   }
 
   const guildfordPlaces = places.filter((p) =>
-    p.address?.toLowerCase().includes('guildford')
+    isTrulyInGuildford(p.address ?? '')
   );
 
   const nonGuildford = places.length - guildfordPlaces.length;

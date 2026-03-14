@@ -59,6 +59,11 @@ const FeatureEvidenceSchema = z.object({
   kids_menu: z.array(z.string()),
   staff_child_friendly: z.array(z.string()),
   noise_tolerant: z.array(z.string()),
+  family_friendly: z.array(z.string()),
+  spacious: z.array(z.string()),
+  accommodating: z.array(z.string()),
+  good_for_groups: z.array(z.string()),
+  relaxed_atmosphere: z.array(z.string()),
 });
 
 const ExtractionResultSchema = z.object({
@@ -68,6 +73,11 @@ const ExtractionResultSchema = z.object({
   kids_menu: FeaturePresenceSchema,
   staff_child_friendly: FeaturePresenceSchema,
   noise_tolerant: FeaturePresenceSchema,
+  family_friendly: FeaturePresenceSchema,
+  spacious: FeaturePresenceSchema,
+  accommodating: FeaturePresenceSchema,
+  good_for_groups: FeaturePresenceSchema,
+  relaxed_atmosphere: FeaturePresenceSchema,
   negative_signals: z.array(z.string()),
   evidence_quotes: z.array(z.string()),
   feature_evidence: FeatureEvidenceSchema,
@@ -85,8 +95,17 @@ const FEATURE_EVIDENCE_SCHEMA = {
     kids_menu: { type: "array", items: { type: "string" } },
     staff_child_friendly: { type: "array", items: { type: "string" } },
     noise_tolerant: { type: "array", items: { type: "string" } },
+    family_friendly: { type: "array", items: { type: "string" } },
+    spacious: { type: "array", items: { type: "string" } },
+    accommodating: { type: "array", items: { type: "string" } },
+    good_for_groups: { type: "array", items: { type: "string" } },
+    relaxed_atmosphere: { type: "array", items: { type: "string" } },
   },
-  required: ["high_chairs", "pram_space", "changing_table", "kids_menu", "staff_child_friendly", "noise_tolerant"],
+  required: [
+    "high_chairs", "pram_space", "changing_table", "kids_menu",
+    "staff_child_friendly", "noise_tolerant", "family_friendly",
+    "spacious", "accommodating", "good_for_groups", "relaxed_atmosphere",
+  ],
   additionalProperties: false,
 };
 
@@ -99,20 +118,20 @@ const EXTRACTION_JSON_SCHEMA = {
     kids_menu: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
     staff_child_friendly: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
     noise_tolerant: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    family_friendly: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    spacious: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    accommodating: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    good_for_groups: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    relaxed_atmosphere: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
     negative_signals: { type: "array", items: { type: "string" } },
     evidence_quotes: { type: "array", items: { type: "string" } },
     feature_evidence: FEATURE_EVIDENCE_SCHEMA,
   },
   required: [
-    "high_chairs",
-    "pram_space",
-    "changing_table",
-    "kids_menu",
-    "staff_child_friendly",
-    "noise_tolerant",
-    "negative_signals",
-    "evidence_quotes",
-    "feature_evidence",
+    "high_chairs", "pram_space", "changing_table", "kids_menu",
+    "staff_child_friendly", "noise_tolerant", "family_friendly",
+    "spacious", "accommodating", "good_for_groups", "relaxed_atmosphere",
+    "negative_signals", "evidence_quotes", "feature_evidence",
   ],
   additionalProperties: false,
 };
@@ -643,9 +662,12 @@ async function extractWithRetry(
   }
 }
 
-const EXTRACTION_SYSTEM_PROMPT = `You are an expert at extracting toddler-friendliness signals from restaurant reviews and website content.
+const EXTRACTION_SYSTEM_PROMPT = `You are analysing restaurant reviews and menu/website information to determine how suitable the venue is for toddlers (ages 1–4).
 
-Given a set of reviews and optionally menu/website content, extract the following information and return it as JSON:
+You will receive a list of sentences from restaurant reviews, web mentions, and possibly menu or website content. Analyse them and extract toddler-relevant signals.
+
+Return ONLY valid JSON with no markdown or code fences, using this exact structure:
+
 {
   "high_chairs": true | false | "unknown",
   "pram_space": true | false | "unknown",
@@ -653,15 +675,25 @@ Given a set of reviews and optionally menu/website content, extract the followin
   "kids_menu": true | false | "unknown",
   "staff_child_friendly": true | false | "unknown",
   "noise_tolerant": true | false | "unknown",
-  "negative_signals": ["short plain-English description of each concern"],
-  "evidence_quotes": ["verbatim short quote from reviews (max 120 chars each)"],
+  "family_friendly": true | false | "unknown",
+  "spacious": true | false | "unknown",
+  "accommodating": true | false | "unknown",
+  "good_for_groups": true | false | "unknown",
+  "relaxed_atmosphere": true | false | "unknown",
+  "negative_signals": ["short description of negative finding"],
+  "evidence_quotes": ["exact short quote from a review"],
   "feature_evidence": {
-    "high_chairs": ["verbatim quote supporting this feature (max 120 chars)"],
-    "pram_space": ["verbatim quote supporting this feature (max 120 chars)"],
-    "changing_table": ["verbatim quote supporting this feature (max 120 chars)"],
-    "kids_menu": ["verbatim quote supporting this feature (max 120 chars)"],
-    "staff_child_friendly": ["verbatim quote supporting this feature (max 120 chars)"],
-    "noise_tolerant": ["verbatim quote supporting this feature (max 120 chars)"]
+    "high_chairs": ["verbatim quote supporting this feature"],
+    "pram_space": ["verbatim quote supporting this feature"],
+    "changing_table": ["verbatim quote supporting this feature"],
+    "kids_menu": ["verbatim quote supporting this feature"],
+    "staff_child_friendly": ["verbatim quote supporting this feature"],
+    "noise_tolerant": ["verbatim quote supporting this feature"],
+    "family_friendly": ["verbatim quote supporting this feature"],
+    "spacious": ["verbatim quote supporting this feature"],
+    "accommodating": ["verbatim quote supporting this feature"],
+    "good_for_groups": ["verbatim quote supporting this feature"],
+    "relaxed_atmosphere": ["verbatim quote supporting this feature"]
   }
 }
 
@@ -673,18 +705,35 @@ Rules:
   - "kids meal available" / "little ones menu" / "mini menu" → kids_menu: true
   - "little ones" section on a menu page → kids_menu: true
   - "plenty of room for us all including the pushchair" → pram_space: true
+  - "so much space, no problem with the buggy" → pram_space: true
   - "baby-friendly toilets" / "parent and baby room" → changing_table: true
   - "nowhere to change the baby" → changing_table: false
-  - "no high chairs available" → high_chairs: false
+  - "no high chairs available" / "they don't have high chairs" → high_chairs: false
+  - "not suitable for children" / "more of an adult venue" → mark as negative
   - "very loud and echoey" → noise_tolerant: false
   - "relaxed and easy-going, kids welcome" → noise_tolerant: true
 - Mark false only if the source explicitly states the feature is absent or unsuitable.
 - Use "unknown" only when there is genuinely no evidence either way.
-- negative_signals: list specific concerns (cramped, loud, not welcoming, etc.)
-- evidence_quotes: pick 3-5 concise verbatim phrases that best illustrate toddler-friendliness.
-- feature_evidence: for EACH feature, list every verbatim quote that directly supports it. Use an empty array if there is no evidence.
-- If menu or website content is included (prefixed [Menu] or [Website]), use it to infer kids_menu and high_chairs.
-- Return only the JSON object, no prose.`;
+- negative_signals: list short plain-English descriptions of negative findings (e.g. "Too cramped for a buggy", "Staff seemed annoyed by children").
+- evidence_quotes: extract short verbatim quotes (under 20 words each) that directly support your conclusions.
+- feature_evidence: for EACH feature, list every verbatim quote (under 20 words each) that supports it. Use an empty array if there is no evidence.
+- If a menu page or website content is included (prefixed [Menu] or [Website]), use it to infer kids_menu and high_chairs where applicable.
+- If no toddler-relevant information exists at all, return "unknown" for all features and empty arrays.
+
+Evidence phrases to look for (including soft/indirect language):
+
+high_chairs: "high chair", "highchair", "booster seat", "brought a chair for baby", "fetched a seat for the little one", "chair for baby", "child seat"
+pram_space: "room for buggy", "pram", "pushchair", "stroller", "buggy", "space for the pram", "no trouble with the pushchair", "plenty of room"
+changing_table: "baby changing", "changing table", "changing facilities", "parent and baby", "baby-friendly toilet", "nowhere to change"
+kids_menu: "kids menu", "children's menu", "kids' options", "little ones menu", "mini menu", "kids eat", "children eat", "junior menu", "kids meals"
+staff_child_friendly: "staff were great with", "patient with kids", "welcoming to children", "staff helped", "staff brought", "very welcoming", "so kind to our children", "loved having kids", "brilliant with the little ones"
+noise_tolerant: "relaxed atmosphere", "lots of families", "kids running around", "child-friendly", "lively but family", "very loud", "echoes", "too noisy for kids"
+family_friendly: "family friendly", "family-friendly", "great for families", "family restaurant", "welcomes families", "ideal for families", "perfect for a family"
+spacious: "spacious", "lots of space", "plenty of room", "roomy", "open plan", "big tables", "spread out"
+accommodating: "accommodating", "flexible", "went out of their way", "happy to help", "very helpful", "nothing was too much"
+good_for_groups: "good for groups", "large groups", "big party", "group booking", "caters for groups"
+relaxed_atmosphere: "relaxed", "laid-back", "no rush", "chilled", "casual atmosphere", "not rushed"
+negative: "too cramped", "no changing", "staff seemed annoyed", "not suitable for children", "no high chairs", "difficult with pram", "not a place for children", "adult venue"`;
 
 const SUMMARY_SYSTEM_PROMPT = `You write concise, factual summaries for a toddler-friendly restaurant guide.
 Given a list of evidence phrases, write one plain-English sentence (max 30 words) summarising whether the venue is good for toddlers and why.
@@ -698,12 +747,17 @@ interface FeatureWeightConfig {
 }
 
 const FEATURE_WEIGHTS: Record<string, FeatureWeightConfig> = {
-  high_chairs:          { category: "high_chair",            delta: 2, minEvidence: 1 },
-  kids_menu:            { category: "kids_menu",             delta: 2, minEvidence: 1 },
-  pram_space:           { category: "pram_space",            delta: 1, minEvidence: 1 },
-  changing_table:       { category: "changing_table",        delta: 1, minEvidence: 1 },
-  staff_child_friendly: { category: "staff_child_friendly",  negativeCategory: "staff_unfriendly", delta: 1, minEvidence: 1 },
-  noise_tolerant:       { category: "family_friendly",       negativeCategory: "noise_issue",      delta: 1, minEvidence: 1 },
+  high_chairs:          { category: "high_chair",            delta: 2,   minEvidence: 1 },
+  kids_menu:            { category: "kids_menu",             delta: 2,   minEvidence: 1 },
+  pram_space:           { category: "pram_space",            delta: 1,   minEvidence: 1 },
+  changing_table:       { category: "changing_table",        delta: 1,   minEvidence: 1 },
+  staff_child_friendly: { category: "staff_child_friendly",  negativeCategory: "staff_unfriendly", delta: 1,   minEvidence: 1 },
+  noise_tolerant:       { category: "family_friendly",       negativeCategory: "noise_issue",      delta: 1,   minEvidence: 1 },
+  family_friendly:      { category: "family_friendly",       delta: 0.5, minEvidence: 1 },
+  spacious:             { category: "pram_space",            delta: 0.5, minEvidence: 1 },
+  accommodating:        { category: "staff_child_friendly",  delta: 0.5, minEvidence: 1 },
+  good_for_groups:      { category: "family_friendly",       delta: 0.5, minEvidence: 1 },
+  relaxed_atmosphere:   { category: "family_friendly",       delta: 0.5, minEvidence: 1 },
 };
 
 function scoreExtraction(
@@ -900,6 +954,11 @@ async function runAnalysis(
       kids_menu: extracted.kids_menu,
       staff_child_friendly: extracted.staff_child_friendly,
       noise_tolerant: extracted.noise_tolerant,
+      family_friendly: extracted.family_friendly,
+      spacious: extracted.spacious,
+      accommodating: extracted.accommodating,
+      good_for_groups: extracted.good_for_groups,
+      relaxed_atmosphere: extracted.relaxed_atmosphere,
     },
     signal_breakdown: scored.signal_breakdown,
   };

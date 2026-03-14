@@ -64,6 +64,8 @@ const FeatureEvidenceSchema = z.object({
   accommodating: z.array(z.string()),
   good_for_groups: z.array(z.string()),
   relaxed_atmosphere: z.array(z.string()),
+  play_area: z.array(z.string()),
+  outdoor_seating: z.array(z.string()),
 });
 
 const ExtractionResultSchema = z.object({
@@ -78,6 +80,8 @@ const ExtractionResultSchema = z.object({
   accommodating: FeaturePresenceSchema,
   good_for_groups: FeaturePresenceSchema,
   relaxed_atmosphere: FeaturePresenceSchema,
+  play_area: FeaturePresenceSchema,
+  outdoor_seating: FeaturePresenceSchema,
   negative_signals: z.array(z.string()),
   evidence_quotes: z.array(z.string()),
   feature_evidence: FeatureEvidenceSchema,
@@ -100,11 +104,14 @@ const FEATURE_EVIDENCE_SCHEMA = {
     accommodating: { type: "array", items: { type: "string" } },
     good_for_groups: { type: "array", items: { type: "string" } },
     relaxed_atmosphere: { type: "array", items: { type: "string" } },
+    play_area: { type: "array", items: { type: "string" } },
+    outdoor_seating: { type: "array", items: { type: "string" } },
   },
   required: [
     "high_chairs", "pram_space", "changing_table", "kids_menu",
     "staff_child_friendly", "noise_tolerant", "family_friendly",
     "spacious", "accommodating", "good_for_groups", "relaxed_atmosphere",
+    "play_area", "outdoor_seating",
   ],
   additionalProperties: false,
 };
@@ -123,6 +130,8 @@ const EXTRACTION_JSON_SCHEMA = {
     accommodating: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
     good_for_groups: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
     relaxed_atmosphere: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    play_area: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
+    outdoor_seating: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["unknown"] }] },
     negative_signals: { type: "array", items: { type: "string" } },
     evidence_quotes: { type: "array", items: { type: "string" } },
     feature_evidence: FEATURE_EVIDENCE_SCHEMA,
@@ -131,6 +140,7 @@ const EXTRACTION_JSON_SCHEMA = {
     "high_chairs", "pram_space", "changing_table", "kids_menu",
     "staff_child_friendly", "noise_tolerant", "family_friendly",
     "spacious", "accommodating", "good_for_groups", "relaxed_atmosphere",
+    "play_area", "outdoor_seating",
     "negative_signals", "evidence_quotes", "feature_evidence",
   ],
   additionalProperties: false,
@@ -680,6 +690,8 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
   "accommodating": true | false | "unknown",
   "good_for_groups": true | false | "unknown",
   "relaxed_atmosphere": true | false | "unknown",
+  "play_area": true | false | "unknown",
+  "outdoor_seating": true | false | "unknown",
   "negative_signals": ["short description of negative finding"],
   "evidence_quotes": ["exact short quote from a review"],
   "feature_evidence": {
@@ -693,7 +705,9 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
     "spacious": ["verbatim quote supporting this feature"],
     "accommodating": ["verbatim quote supporting this feature"],
     "good_for_groups": ["verbatim quote supporting this feature"],
-    "relaxed_atmosphere": ["verbatim quote supporting this feature"]
+    "relaxed_atmosphere": ["verbatim quote supporting this feature"],
+    "play_area": ["verbatim quote supporting this feature"],
+    "outdoor_seating": ["verbatim quote supporting this feature"]
   }
 }
 
@@ -712,6 +726,10 @@ Rules:
   - "not suitable for children" / "more of an adult venue" → mark as negative
   - "very loud and echoey" → noise_tolerant: false
   - "relaxed and easy-going, kids welcome" → noise_tolerant: true
+  - "our daughter loved the play corner" → play_area: true
+  - "kids' activity packs" / "colouring sheets" → play_area: true
+  - "sat outside in the sun with the kids" → outdoor_seating: true
+  - "lovely garden for the children to run around" → outdoor_seating: true
 - Mark false only if the source explicitly states the feature is absent or unsuitable.
 - Use "unknown" only when there is genuinely no evidence either way.
 - negative_signals: list short plain-English descriptions of negative findings (e.g. "Too cramped for a buggy", "Staff seemed annoyed by children").
@@ -733,6 +751,8 @@ spacious: "spacious", "lots of space", "plenty of room", "roomy", "open plan", "
 accommodating: "accommodating", "flexible", "went out of their way", "happy to help", "very helpful", "nothing was too much"
 good_for_groups: "good for groups", "large groups", "big party", "group booking", "caters for groups"
 relaxed_atmosphere: "relaxed", "laid-back", "no rush", "chilled", "casual atmosphere", "not rushed"
+play_area: "play area", "play corner", "toys", "activity packs", "colouring sheets", "chalk board", "kids' entertainment", "play equipment", "soft play"
+outdoor_seating: "outdoor seating", "garden", "terrace", "patio", "outside tables", "al fresco", "beer garden", "outside area", "courtyard"
 negative: "too cramped", "no changing", "staff seemed annoyed", "not suitable for children", "no high chairs", "difficult with pram", "not a place for children", "adult venue"`;
 
 const SUMMARY_SYSTEM_PROMPT = `You write concise, factual summaries for a toddler-friendly restaurant guide.
@@ -758,6 +778,8 @@ const FEATURE_WEIGHTS: Record<string, FeatureWeightConfig> = {
   accommodating:        { category: "staff_child_friendly",  delta: 0.5, minEvidence: 1 },
   good_for_groups:      { category: "family_friendly",       delta: 0.5, minEvidence: 1 },
   relaxed_atmosphere:   { category: "family_friendly",       delta: 0.5, minEvidence: 1 },
+  play_area:            { category: "family_friendly",       delta: 0.5, minEvidence: 1 },
+  outdoor_seating:      { category: "pram_space",            delta: 0.5, minEvidence: 1 },
 };
 
 function scoreExtraction(
@@ -960,6 +982,8 @@ async function runAnalysis(
       accommodating: extracted.accommodating,
       good_for_groups: extracted.good_for_groups,
       relaxed_atmosphere: extracted.relaxed_atmosphere,
+      play_area: extracted.play_area,
+      outdoor_seating: extracted.outdoor_seating,
     },
     signal_breakdown: scored.signal_breakdown,
   };

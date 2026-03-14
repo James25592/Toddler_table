@@ -55,6 +55,8 @@ const FeatureEvidenceSchema = z.object({
   accommodating: z.array(z.string()),
   good_for_groups: z.array(z.string()),
   relaxed_atmosphere: z.array(z.string()),
+  play_area: z.array(z.string()),
+  outdoor_seating: z.array(z.string()),
 });
 
 export const ExtractionResultSchema = z.object({
@@ -69,6 +71,8 @@ export const ExtractionResultSchema = z.object({
   accommodating: FeaturePresenceSchema,
   good_for_groups: FeaturePresenceSchema,
   relaxed_atmosphere: FeaturePresenceSchema,
+  play_area: FeaturePresenceSchema,
+  outdoor_seating: FeaturePresenceSchema,
   negative_signals: z.array(z.string()),
   evidence_quotes: z.array(z.string()),
   feature_evidence: FeatureEvidenceSchema,
@@ -90,11 +94,14 @@ const FEATURE_EVIDENCE_SCHEMA = {
     accommodating: { type: 'array', items: { type: 'string' } },
     good_for_groups: { type: 'array', items: { type: 'string' } },
     relaxed_atmosphere: { type: 'array', items: { type: 'string' } },
+    play_area: { type: 'array', items: { type: 'string' } },
+    outdoor_seating: { type: 'array', items: { type: 'string' } },
   },
   required: [
     'high_chairs', 'pram_space', 'changing_table', 'kids_menu',
     'staff_child_friendly', 'noise_tolerant',
     'family_friendly', 'spacious', 'accommodating', 'good_for_groups', 'relaxed_atmosphere',
+    'play_area', 'outdoor_seating',
   ],
   additionalProperties: false,
 };
@@ -115,6 +122,8 @@ const EXTRACTION_JSON_SCHEMA = {
     accommodating: FEATURE_PRESENCE,
     good_for_groups: FEATURE_PRESENCE,
     relaxed_atmosphere: FEATURE_PRESENCE,
+    play_area: FEATURE_PRESENCE,
+    outdoor_seating: FEATURE_PRESENCE,
     negative_signals: { type: 'array', items: { type: 'string' } },
     evidence_quotes: { type: 'array', items: { type: 'string' } },
     feature_evidence: FEATURE_EVIDENCE_SCHEMA,
@@ -123,6 +132,7 @@ const EXTRACTION_JSON_SCHEMA = {
     'high_chairs', 'pram_space', 'changing_table', 'kids_menu',
     'staff_child_friendly', 'noise_tolerant',
     'family_friendly', 'spacious', 'accommodating', 'good_for_groups', 'relaxed_atmosphere',
+    'play_area', 'outdoor_seating',
     'negative_signals', 'evidence_quotes', 'feature_evidence',
   ],
   additionalProperties: false,
@@ -521,6 +531,8 @@ export async function analyseRestaurantReviews(
       extracted.accommodating !== 'unknown' ||
       extracted.good_for_groups !== 'unknown' ||
       extracted.relaxed_atmosphere !== 'unknown' ||
+      extracted.play_area !== 'unknown' ||
+      extracted.outdoor_seating !== 'unknown' ||
       extracted.negative_signals.length > 0;
 
     if (!hasAnySignal) {

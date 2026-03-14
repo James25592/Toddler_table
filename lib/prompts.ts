@@ -172,6 +172,8 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
   "accommodating": true | false | "unknown",
   "good_for_groups": true | false | "unknown",
   "relaxed_atmosphere": true | false | "unknown",
+  "play_area": true | false | "unknown",
+  "outdoor_seating": true | false | "unknown",
   "negative_signals": ["short description of negative finding"],
   "evidence_quotes": ["exact short quote from a review"],
   "feature_evidence": {
@@ -185,7 +187,9 @@ Return ONLY valid JSON with no markdown or code fences, using this exact structu
     "spacious": ["verbatim quote supporting this feature"],
     "accommodating": ["verbatim quote supporting this feature"],
     "good_for_groups": ["verbatim quote supporting this feature"],
-    "relaxed_atmosphere": ["verbatim quote supporting this feature"]
+    "relaxed_atmosphere": ["verbatim quote supporting this feature"],
+    "play_area": ["verbatim quote supporting this feature"],
+    "outdoor_seating": ["verbatim quote supporting this feature"]
   }
 }
 
@@ -204,6 +208,10 @@ Rules:
   - "not suitable for children" / "more of an adult venue" → mark as negative
   - "very loud and echoey" → noise_tolerant: false
   - "relaxed and easy-going, kids welcome" → noise_tolerant: true
+  - "our daughter loved the play corner" → play_area: true
+  - "kids' activity packs" / "colouring sheets" → play_area: true
+  - "sat outside in the sun with the kids" → outdoor_seating: true
+  - "lovely garden for the children to run around" → outdoor_seating: true
 - Mark false only if the source explicitly states the feature is absent or unsuitable.
 - Use "unknown" only when there is genuinely no evidence either way.
 - negative_signals: list short plain-English descriptions of negative findings (e.g. "Too cramped for a buggy", "Staff seemed annoyed by children").
@@ -225,6 +233,8 @@ spacious: "spacious", "lots of space", "plenty of room", "roomy", "open plan", "
 accommodating: "accommodating", "flexible", "went out of their way", "happy to help", "very helpful", "nothing was too much"
 good_for_groups: "good for groups", "large groups", "big party", "group booking", "caters for groups"
 relaxed_atmosphere: "relaxed", "laid-back", "no rush", "chilled", "casual atmosphere", "not rushed"
+play_area: "play area", "play corner", "toys", "activity packs", "colouring sheets", "chalk board", "kids' entertainment", "play equipment", "soft play"
+outdoor_seating: "outdoor seating", "garden", "terrace", "patio", "outside tables", "al fresco", "beer garden", "outside area", "courtyard"
 negative: "too cramped", "no changing", "staff seemed annoyed", "not suitable for children", "no high chairs", "difficult with pram", "not a place for children", "adult venue"`;
 
 export function buildStructuredExtractionPrompt(sentences: string[]): string {

@@ -110,6 +110,8 @@ const STRUCTURED_POSITIVE_WEIGHTS: Record<string, FeatureWeight> = {
   accommodating:        { category: 'welcoming staff toward children', delta: 0.5, minEvidence: 1 },
   good_for_groups:      { category: 'family friendly atmosphere',      delta: 0.5, minEvidence: 1 },
   relaxed_atmosphere:   { category: 'family friendly atmosphere',      delta: 0.5, minEvidence: 1 },
+  play_area:            { category: 'family friendly atmosphere',      delta: 0.5, minEvidence: 1 },
+  outdoor_seating:      { category: 'spacious seating',                delta: 0.5, minEvidence: 1 },
 };
 
 function evidenceCount(featureEvidence: FeatureEvidence, key: keyof FeatureEvidence): number {

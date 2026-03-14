@@ -90,6 +90,8 @@ export interface FeatureEvidence {
   accommodating: string[];
   good_for_groups: string[];
   relaxed_atmosphere: string[];
+  play_area: string[];
+  outdoor_seating: string[];
 }
 
 export interface StructuredExtractionResult {
@@ -104,6 +106,8 @@ export interface StructuredExtractionResult {
   accommodating: FeaturePresence;
   good_for_groups: FeaturePresence;
   relaxed_atmosphere: FeaturePresence;
+  play_area: FeaturePresence;
+  outdoor_seating: FeaturePresence;
   negative_signals: string[];
   evidence_quotes: string[];
   feature_evidence: FeatureEvidence;

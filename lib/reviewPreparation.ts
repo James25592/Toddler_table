@@ -27,6 +27,51 @@ export interface PreparedReviewContext {
   totalChars: number;
 }
 
+const INFERENCE_LINE_FEATURE_PATTERNS: Array<{ pattern: RegExp; key: string }> = [
+  { pattern: /high chair/i,                              key: 'high_chairs' },
+  { pattern: /kids menu|children'?s menu/i,              key: 'kids_menu' },
+  { pattern: /pram|stroller|buggy|pushchair/i,           key: 'pram_space' },
+  { pattern: /changing (table|facilit)/i,                key: 'changing_table' },
+  { pattern: /staff.{0,30}(child|famil|toddler|welcom)/i, key: 'staff_child_friendly' },
+  { pattern: /(noise|loud|tolerant)/i,                   key: 'noise_tolerant' },
+  { pattern: /play area/i,                               key: 'play_area' },
+  { pattern: /outdoor seating/i,                         key: 'outdoor_seating' },
+  { pattern: /(famil|welcom|toddler).{0,40}(venue|atmosphere|place)/i, key: 'family_friendly' },
+  { pattern: /spacious|space|roomy/i,                    key: 'spacious' },
+];
+
+function inferenceLineFeatureKey(line: string): string | null {
+  for (const { pattern, key } of INFERENCE_LINE_FEATURE_PATTERNS) {
+    if (pattern.test(line)) return key;
+  }
+  return null;
+}
+
+function isInferenceLine(line: string): boolean {
+  return line.startsWith('[Website]') || line.startsWith('[Review]') || line.startsWith('[Menu]');
+}
+
+function deduplicateInferenceLines(lines: string[]): string[] {
+  const seenFeatureKeys = new Set<string>();
+  const result: string[] = [];
+  for (const line of lines) {
+    if (!isInferenceLine(line)) {
+      result.push(line);
+      continue;
+    }
+    const key = inferenceLineFeatureKey(line);
+    if (key === null) {
+      result.push(line);
+      continue;
+    }
+    if (!seenFeatureKeys.has(key)) {
+      seenFeatureKeys.add(key);
+      result.push(line);
+    }
+  }
+  return result;
+}
+
 function splitIntoSentences(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+/)
@@ -128,7 +173,9 @@ export function prepareReviewContext(sources: ReviewInputSources): string[] {
 
   const deduped = deduplicateSentences(allSentences);
 
-  const prioritised = prioritiseSentences(deduped);
+  const deduplicatedInferences = deduplicateInferenceLines(deduped);
+
+  const prioritised = prioritiseSentences(deduplicatedInferences);
 
   return prioritised;
 }

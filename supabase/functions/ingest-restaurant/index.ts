@@ -522,6 +522,47 @@ function filterToddlerReviews(reviews: string[]): string[] {
   });
 }
 
+const INFERENCE_LINE_FEATURE_PATTERNS: Array<{ pattern: RegExp; key: string }> = [
+  { pattern: /high chair/i,                               key: "high_chairs" },
+  { pattern: /kids menu|children'?s menu/i,               key: "kids_menu" },
+  { pattern: /pram|stroller|buggy|pushchair/i,            key: "pram_space" },
+  { pattern: /changing (table|facilit)/i,                 key: "changing_table" },
+  { pattern: /staff.{0,30}(child|famil|toddler|welcom)/i, key: "staff_child_friendly" },
+  { pattern: /(noise|loud|tolerant)/i,                    key: "noise_tolerant" },
+  { pattern: /play area/i,                                key: "play_area" },
+  { pattern: /outdoor seating/i,                          key: "outdoor_seating" },
+  { pattern: /(famil|welcom|toddler).{0,40}(venue|atmosphere|place)/i, key: "family_friendly" },
+  { pattern: /spacious|space|roomy/i,                     key: "spacious" },
+];
+
+function isInferenceLine(line: string): boolean {
+  return line.startsWith("[Website]") || line.startsWith("[Review]") || line.startsWith("[Menu]");
+}
+
+function deduplicateInferenceLines(lines: string[]): string[] {
+  const seenKeys = new Set<string>();
+  const result: string[] = [];
+  for (const line of lines) {
+    if (!isInferenceLine(line)) {
+      result.push(line);
+      continue;
+    }
+    let matched = false;
+    for (const { pattern, key } of INFERENCE_LINE_FEATURE_PATTERNS) {
+      if (pattern.test(line)) {
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          result.push(line);
+        }
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) result.push(line);
+  }
+  return result;
+}
+
 function truncateReviews(reviews: string[], maxChars = 3000): string[] {
   const result: string[] = [];
   let total = 0;
@@ -928,10 +969,10 @@ async function runAnalysis(
   );
 
   const truncated = truncateReviews(reviews);
+  const dedupedInferenceLines = deduplicateInferenceLines([...websiteLines, ...socialInferenceLines]);
   const reviewBlock = [
     ...truncated.map((r, i) => `Review ${i + 1}:\n${r}`),
-    ...websiteLines,
-    ...socialInferenceLines,
+    ...dedupedInferenceLines,
   ].join("\n\n");
 
   let extracted: ExtractionResult;

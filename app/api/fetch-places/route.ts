@@ -54,7 +54,10 @@ function slugify(name: string): string {
     .slice(0, 80);
 }
 
-const DETAILS_CONCURRENCY = 5;
+const DETAILS_CONCURRENCY = 1;
+const INGEST_TIMEOUT_MS = 90_000;
+
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
@@ -126,8 +129,12 @@ export async function POST(req: NextRequest) {
         try {
           const image_url = pickImage(place.venue_type, globalIdx);
 
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), INGEST_TIMEOUT_MS);
+
           const res = await fetch(ingestUrl, {
             method: 'POST',
+            signal: controller.signal,
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${supabaseAnonKey}`,
@@ -144,6 +151,8 @@ export async function POST(req: NextRequest) {
             }),
           });
 
+          clearTimeout(timeoutId);
+
           if (!res.ok) {
             const errText = await res.text();
             errors.push({ name: place.name, error: `Ingest function error ${res.status}: ${errText}` });
@@ -157,9 +166,10 @@ export async function POST(req: NextRequest) {
             inserted.push(place.name);
           }
         } catch (err) {
+          const isTimeout = err instanceof Error && err.name === 'AbortError';
           errors.push({
             name: place.name,
-            error: err instanceof Error ? err.message : 'Unknown error',
+            error: isTimeout ? 'Timed out after 90s — venue may still have been saved' : (err instanceof Error ? err.message : 'Unknown error'),
           });
         }
       }),
